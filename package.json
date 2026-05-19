@@ -1,0 +1,33 @@
+{
+  "name": "polymarket-updown-bot",
+  "version": "0.1.0",
+  "description": "ETH/USDT Polymarket Up/Down paper/live trading bot.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "dev:once": "node -r ts-node/register -e \"process.env.RUN_ONCE='1'; require('./src/index.ts')\"",
+    "dry-run": "node -r ts-node/register -e \"process.env.EXECUTION_MODE='live_dry_run'; require('./src/index.ts')\"",
+    "dry-run:once": "node -r ts-node/register -e \"process.env.EXECUTION_MODE='live_dry_run'; process.env.RUN_ONCE='1'; require('./src/index.ts')\"",
+    "live": "node -r ts-node/register -e \"process.env.EXECUTION_MODE='live'; require('./src/index.ts')\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "polymarket",
+    "paper-trading",
+    "ethusdt"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@polymarket/clob-client-v2": "^1.0.6",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "viem": "^2.50.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
