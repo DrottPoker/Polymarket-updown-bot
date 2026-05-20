@@ -3,8 +3,43 @@ import { dirname, resolve } from "node:path";
 import { AppConfig } from "./config";
 import { LiveOrder, PaperTrade, ResolvedPaperTrade } from "./types";
 
-const csvHeader =
-  "signal_time,candle_open_time,candle_close_time,symbol,direction,entry_cents,stake_usd,shares,open,close,result,pnl,reason";
+const tradeCsvColumns = [
+  "signal_time",
+  "candle_open_time",
+  "candle_close_time",
+  "symbol",
+  "direction",
+  "entry_cents",
+  "stake_usd",
+  "shares",
+  "open",
+  "close",
+  "result",
+  "pnl",
+  "reason",
+  "kind",
+  "market_slug",
+  "polymarket_outcome",
+  "token_id",
+  "order_id",
+  "live_status",
+  "live_filled",
+  "live_price",
+  "live_size",
+];
+const csvHeader = tradeCsvColumns.join(",");
+
+type CsvRow = Record<string, string>;
+
+type StatsBucket = {
+  scope: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  pnl: number;
+  stake: number;
+  entryCents: number;
+};
 
 function toIso(ms: number): string {
   return new Date(ms).toISOString();
@@ -15,13 +50,138 @@ function formatMoney(value: number): string {
   return `${prefix}$${value.toFixed(2)}`;
 }
 
-function csvEscape(value: string | number): string {
-  const text = String(value);
+function csvEscape(value: string | number | boolean | null | undefined): string {
+  const text = value === null || value === undefined ? "" : String(value);
   if (/[",\n\r]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;
   }
 
   return text;
+}
+
+function parseCsvLine(line: string): string[] {
+  const values: string[] = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      values.push(value);
+      value = "";
+      continue;
+    }
+
+    value += char;
+  }
+
+  values.push(value);
+  return values;
+}
+
+function readCsvRows(file: string): CsvRow[] {
+  const absolutePath = resolve(file);
+  if (!existsSync(absolutePath)) {
+    return [];
+  }
+
+  const lines = readFileSync(absolutePath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0);
+  if (lines.length <= 1) {
+    return [];
+  }
+
+  const columns = parseCsvLine(lines[0]);
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return columns.reduce<CsvRow>((row, column, index) => {
+      row[column] = values[index] ?? "";
+      return row;
+    }, {});
+  });
+}
+
+function formatStatNumber(value: number, decimals = 2): number {
+  return Number(value.toFixed(decimals));
+}
+
+function createBucket(scope: string): StatsBucket {
+  return {
+    scope,
+    trades: 0,
+    wins: 0,
+    losses: 0,
+    pnl: 0,
+    stake: 0,
+    entryCents: 0,
+  };
+}
+
+function addTradeToBucket(bucket: StatsBucket, row: CsvRow): void {
+  const result = row.result?.toUpperCase();
+  if (result !== "WIN" && result !== "LOSS") {
+    return;
+  }
+
+  bucket.trades += 1;
+  bucket.wins += result === "WIN" ? 1 : 0;
+  bucket.losses += result === "LOSS" ? 1 : 0;
+  bucket.pnl += Number(row.pnl || 0);
+  bucket.stake += Number(row.stake_usd || 0);
+  bucket.entryCents += Number(row.entry_cents || 0);
+}
+
+function inferTradeKind(row: CsvRow): string {
+  const kind = row.kind?.toUpperCase();
+  if (kind === "BASE" || kind === "RETRY") {
+    return kind;
+  }
+
+  const reason = row.reason?.toLowerCase() ?? "";
+  if (reason.includes("retry")) {
+    return "RETRY";
+  }
+
+  if (reason.includes("base")) {
+    return "BASE";
+  }
+
+  return "";
+}
+
+function bucketToCsvRow(updatedAt: string, bucket: StatsBucket): Array<string | number> {
+  const winrate = bucket.trades > 0 ? (bucket.wins / bucket.trades) * 100 : 0;
+  const avgPnl = bucket.trades > 0 ? bucket.pnl / bucket.trades : 0;
+  const avgStake = bucket.trades > 0 ? bucket.stake / bucket.trades : 0;
+  const avgEntry = bucket.trades > 0 ? bucket.entryCents / bucket.trades : 0;
+
+  return [
+    updatedAt,
+    bucket.scope,
+    bucket.trades,
+    bucket.wins,
+    bucket.losses,
+    formatStatNumber(winrate),
+    formatStatNumber(bucket.pnl),
+    formatStatNumber(avgPnl),
+    formatStatNumber(bucket.stake),
+    formatStatNumber(avgStake),
+    formatStatNumber(avgEntry),
+  ];
 }
 
 export function ensureCsvLog(logFile: string): void {
@@ -38,6 +198,20 @@ export function ensureCsvLog(logFile: string): void {
   const lines = existing.split(/\r?\n/).filter((line) => line.trim().length > 0);
   if (lines.length === 0 || (lines.length === 1 && lines[0] !== csvHeader)) {
     writeFileSync(absolutePath, `${csvHeader}\n`, "utf8");
+    return;
+  }
+
+  if (lines[0] !== csvHeader) {
+    const existingColumns = parseCsvLine(lines[0]);
+    const migratedRows = readCsvRows(logFile).map((row) =>
+      tradeCsvColumns.map((column) => csvEscape(column === "kind" ? inferTradeKind(row) : row[column] ?? "")).join(",")
+    );
+    const unknownColumns = existingColumns.filter((column) => !tradeCsvColumns.includes(column));
+    if (unknownColumns.length > 0) {
+      throw new Error(`Cannot migrate ${logFile}; unknown CSV columns: ${unknownColumns.join(", ")}`);
+    }
+
+    writeFileSync(absolutePath, `${csvHeader}\n${migratedRows.join("\n")}${migratedRows.length > 0 ? "\n" : ""}`, "utf8");
   }
 }
 
@@ -68,6 +242,7 @@ export function logStartup(config: AppConfig): void {
   }
   console.log(`poll: ${config.pollMs}ms`);
   console.log(`log: ${config.logFile}`);
+  console.log(`stats: ${config.statsFile}`);
 }
 
 export function logWarmup(closedCandles: number): void {
@@ -155,7 +330,7 @@ export function logError(error: unknown): void {
   console.error(message);
 }
 
-export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade): void {
+export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): void {
   const row = [
     toIso(trade.signalTime),
     toIso(trade.candleOpenTime),
@@ -170,9 +345,60 @@ export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade): v
     trade.result,
     Number(trade.pnl.toFixed(8)),
     trade.reason,
+    trade.kind,
+    liveOrder?.marketSlug,
+    liveOrder?.outcome,
+    liveOrder?.tokenId,
+    liveOrder?.orderId,
+    liveOrder?.status,
+    liveOrder?.filled,
+    liveOrder?.price,
+    liveOrder?.size,
   ]
     .map(csvEscape)
     .join(",");
 
   appendFileSync(resolve(logFile), `${row}\n`, "utf8");
+}
+
+export function refreshStatsLog(tradeLogFile: string, statsFile: string): void {
+  const rows = readCsvRows(tradeLogFile);
+  const buckets = [
+    createBucket("TOTAL"),
+    createBucket("BASE"),
+    createBucket("RETRY"),
+    createBucket("UP"),
+    createBucket("DOWN"),
+    createBucket("BASE_UP"),
+    createBucket("BASE_DOWN"),
+    createBucket("RETRY_UP"),
+    createBucket("RETRY_DOWN"),
+  ];
+  const bucketByScope = new Map(buckets.map((bucket) => [bucket.scope, bucket]));
+
+  for (const row of rows) {
+    const kind = inferTradeKind(row);
+    const direction = row.direction?.toUpperCase();
+    addTradeToBucket(bucketByScope.get("TOTAL") as StatsBucket, row);
+
+    if (kind === "BASE" || kind === "RETRY") {
+      addTradeToBucket(bucketByScope.get(kind) as StatsBucket, row);
+    }
+
+    if (direction === "UP" || direction === "DOWN") {
+      addTradeToBucket(bucketByScope.get(direction) as StatsBucket, row);
+    }
+
+    if ((kind === "BASE" || kind === "RETRY") && (direction === "UP" || direction === "DOWN")) {
+      addTradeToBucket(bucketByScope.get(`${kind}_${direction}`) as StatsBucket, row);
+    }
+  }
+
+  const updatedAt = toIso(Date.now());
+  const statsHeader =
+    "updated_at,scope,trades,wins,losses,winrate_pct,total_pnl,avg_pnl,total_stake,avg_stake,avg_entry_cents";
+  const statsRows = buckets.map((bucket) => bucketToCsvRow(updatedAt, bucket).map(csvEscape).join(","));
+  const absolutePath = resolve(statsFile);
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, `${statsHeader}\n${statsRows.join("\n")}\n`, "utf8");
 }

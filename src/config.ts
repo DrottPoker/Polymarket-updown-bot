@@ -11,6 +11,7 @@ export type AppConfig = {
   pollMs: number;
   candleLimit: number;
   logFile: string;
+  statsFile: string;
   binanceBaseUrl: string;
   ignoreDojiInTrend: boolean;
   useLossRetryLogic: boolean;
@@ -100,6 +101,7 @@ export function loadConfig(): AppConfig {
     pollMs: readNumber("POLL_MS", 1000),
     candleLimit: readNumber("CANDLE_LIMIT", 300),
     logFile: readString("LOG_FILE", "trades.csv"),
+    statsFile: readString("STATS_FILE", "stats.csv"),
     binanceBaseUrl: readString("BINANCE_BASE_URL", "https://api.binance.com"),
     ignoreDojiInTrend: readBoolean("IGNORE_DOJI_IN_TREND", true),
     useLossRetryLogic: readBoolean("USE_LOSS_RETRY_LOGIC", true),

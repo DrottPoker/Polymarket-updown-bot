@@ -74,7 +74,8 @@ function responseHasFill(response: unknown): boolean {
   }
 
   const maybeOrder = response as Partial<OrderResponse>;
-  return Boolean(maybeOrder.tradeIDs?.length);
+  const status = maybeOrder.status?.toLowerCase();
+  return Boolean(maybeOrder.tradeIDs?.length) || status === "matched" || status === "filled";
 }
 
 function getTickSize(value: string): TickSize {
@@ -204,7 +205,7 @@ export class PolymarketLiveExecutor {
   }
 
   async cancelIfDue(order: LiveOrder, now: number): Promise<LiveOrder> {
-    if (order.canceled || !order.orderId || now < order.cancelAt) {
+    if (order.canceled || order.filled || !order.orderId || now < order.cancelAt) {
       return order;
     }
 
@@ -212,7 +213,7 @@ export class PolymarketLiveExecutor {
   }
 
   async cancelOrder(order: LiveOrder): Promise<LiveOrder> {
-    if (order.canceled || !order.orderId) {
+    if (order.canceled || order.filled || !order.orderId) {
       return order;
     }
 

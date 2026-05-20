@@ -40,6 +40,7 @@ EV_STAKE_USD=100
 POLL_MS=1000
 CANDLE_LIMIT=300
 LOG_FILE=trades.csv
+STATS_FILE=stats.csv
 BINANCE_BASE_URL=https://api.binance.com
 IGNORE_DOJI_IN_TREND=false
 USE_LOSS_RETRY_LOGIC=true
@@ -81,6 +82,14 @@ MAX_LIVE_TRADE_WINDOW_SECONDS=60
 - When retry logic is off, a loss blocks same-trend continuation until the trend breaks and 3 fresh candles have formed.
 - The bot warms up strategy state from `CANDLE_LIMIT` Binance candles at startup.
 - Optional early entry can place the next contract order before candle close when the forming candle is already the third trend candle.
+
+## Spreadsheet Logs
+
+The bot writes every resolved trade to `LOG_FILE` as a spreadsheet-friendly CSV. New live trades include Polymarket metadata such as market slug, token id, order id, live status, fill status, live price, and live size.
+
+After each resolved trade, the bot rewrites `STATS_FILE` with aggregate statistics for `TOTAL`, `BASE`, `RETRY`, `UP`, `DOWN`, `BASE_UP`, `BASE_DOWN`, `RETRY_UP`, and `RETRY_DOWN`.
+
+Both files can be opened directly in Excel or imported into Google Sheets.
 
 ## Early Entry
 

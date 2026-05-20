@@ -12,6 +12,7 @@ import {
   logSkip,
   logStartup,
   logWarmup,
+  refreshStatsLog,
 } from "./logger";
 import { createPaperTrade, resolvePaperTrade } from "./paperBroker";
 import { PolymarketLiveExecutor } from "./liveExecutor";
@@ -77,14 +78,23 @@ function warmUpStrategy(closedCandles: Candle[]): void {
   logWarmup(closedCandles.length);
 }
 
+function skipStartupCandle(currentCandle: Candle): void {
+  lastHandledCandleOpenTime = currentCandle.openTime;
+  lastEarlyEntryTargetOpenTime = getNextCandlePlaceholder(currentCandle).openTime;
+  logSkip(`${new Date(currentCandle.openTime).toISOString()} startup candle is already in progress; waiting for next signal`);
+}
+
 async function cancelPendingLiveOrder(): Promise<void> {
   if (!liveExecutor || !pendingLiveOrder || pendingLiveOrder.canceled) {
     return;
   }
 
   try {
-    pendingLiveOrder = await liveExecutor.cancelOrder(pendingLiveOrder);
-    logLiveCancel(pendingLiveOrder);
+    const updatedOrder = await liveExecutor.cancelOrder(pendingLiveOrder);
+    if (!pendingLiveOrder.canceled && updatedOrder.canceled) {
+      logLiveCancel(updatedOrder);
+    }
+    pendingLiveOrder = updatedOrder;
   } catch (error) {
     logError(error);
   }
@@ -179,10 +189,8 @@ async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<
   }
 
   const trade = createPaperTrade(config, decision.signal, nextCandle, now);
-  const opened = await openTrade(trade, currentCandle.openTime);
-  if (opened) {
-    lastEarlyEntryTargetOpenTime = nextCandle.openTime;
-  }
+  await openTrade(trade, currentCandle.openTime);
+  lastEarlyEntryTargetOpenTime = nextCandle.openTime;
 }
 
 async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
@@ -190,8 +198,10 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
 
   for (const candle of newClosedCandles) {
     if (pendingTrade && pendingTrade.candleOpenTime === candle.openTime) {
-      await cancelPendingLiveOrder();
       await refreshPendingLiveOrderFillStatus();
+      if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
+        await cancelPendingLiveOrder();
+      }
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
         logSkip(`${new Date(candle.openTime).toISOString()} live order was not filled; candle will not update retry state`);
         strategy.processClosedCandleWithoutTrade(candle);
@@ -203,7 +213,8 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
 
       const resolvedTrade = resolvePaperTrade(pendingTrade, candle);
       logResult(resolvedTrade);
-      appendTradeResult(config.logFile, resolvedTrade);
+      appendTradeResult(config.logFile, resolvedTrade, pendingLiveOrder);
+      refreshStatsLog(config.logFile, config.statsFile);
       strategy.recordTradeResult(resolvedTrade, candle);
       riskManager.recordResolvedTrade(resolvedTrade);
       pendingTrade = null;
@@ -228,6 +239,8 @@ async function tick(): Promise<void> {
 
   if (!initialized) {
     warmUpStrategy(closedCandles);
+    skipStartupCandle(currentCandle);
+    return;
   } else {
     await processNewClosedCandles(closedCandles);
   }
@@ -269,6 +282,7 @@ async function tick(): Promise<void> {
 
 async function main(): Promise<void> {
   ensureCsvLog(config.logFile);
+  refreshStatsLog(config.logFile, config.statsFile);
   logStartup(config);
 
   while (!shuttingDown) {
