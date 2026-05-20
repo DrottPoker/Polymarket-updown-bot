@@ -1,0 +1,289 @@
+# Polymarket Bot Operations Guide
+
+This guide explains how to install, configure, run, monitor, and update the bot on a Linux VPS.
+
+## Requirements
+
+- Ubuntu/Debian VPS
+- Node.js LTS
+- Git
+- A Polymarket account and funded deposit wallet
+- A Polygon RPC URL
+- Polymarket API credentials or a private key that can derive them
+- A server region that is allowed by Polymarket
+
+Before running live trading, check the server geoblock status:
+
+```bash
+curl https://polymarket.com/api/geoblock
+```
+
+If the response says `"blocked": true`, do not run the bot from that server.
+
+## Install System Dependencies
+
+```bash
+apt update
+apt upgrade -y
+apt install -y git curl build-essential
+```
+
+Install Node.js with `nvm`:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+source ~/.bashrc
+nvm install --lts
+nvm use --lts
+```
+
+Verify:
+
+```bash
+node -v
+npm -v
+```
+
+## Clone And Build
+
+```bash
+mkdir -p /opt/bots
+cd /opt/bots
+git clone <YOUR_GITHUB_REPO_URL> polymarket-updown-bot
+cd polymarket-updown-bot
+npm ci
+npm run build
+```
+
+## Configure Environment
+
+Create the local `.env` file:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Minimum live settings:
+
+```env
+EXECUTION_MODE=live
+LIVE_TRADING_ENABLED=true
+LIVE_CONFIRMATION=PLACE_REAL_POLYMARKET_ORDERS
+
+POLYGON_RPC_URL=https://...
+POLYMARKET_PRIVATE_KEY=0x...
+POLYMARKET_FUNDER_ADDRESS=0x...
+POLYMARKET_SIGNATURE_TYPE=3
+
+STAKE_USD=5
+MAX_STAKE_USD=5
+MAX_DAILY_LOSS_USD=25
+MAX_TRADES_PER_DAY=20
+```
+
+Recommended:
+
+```env
+LOG_FILE=trades.csv
+STATS_FILE=stats.csv
+EARLY_ENTRY_ENABLED=true
+```
+
+Never commit `.env` to GitHub.
+
+## Dry Run
+
+Run a single preflight cycle:
+
+```bash
+npm run dry-run:once
+```
+
+Run continuous dry-run:
+
+```bash
+npm run dry-run
+```
+
+Stop with:
+
+```bash
+Ctrl + C
+```
+
+Dry-run does not place real orders.
+
+## Manual Live Test
+
+Before live trading, enable Polymarket's own auto-redeem wins option in the Polymarket UI.
+
+Run live manually:
+
+```bash
+npm run live
+```
+
+Watch the logs. Stop with:
+
+```bash
+Ctrl + C
+```
+
+Do not run manual live mode at the same time as PM2.
+
+## Run 24/7 With PM2
+
+Install PM2:
+
+```bash
+npm install -g pm2
+```
+
+Start the bot:
+
+```bash
+cd /opt/bots/polymarket-updown-bot
+pm2 start npm --name polymarket-bot -- run live
+```
+
+Check status:
+
+```bash
+pm2 status
+```
+
+View logs:
+
+```bash
+pm2 logs polymarket-bot
+```
+
+Exit the log view with `Ctrl + C`. The bot keeps running.
+
+Enable startup after reboot:
+
+```bash
+pm2 save
+pm2 startup
+```
+
+PM2 will print a command beginning with `sudo env PATH=...`. Copy and run that exact command.
+
+## Common PM2 Commands
+
+Stop the bot:
+
+```bash
+pm2 stop polymarket-bot
+```
+
+Start the bot:
+
+```bash
+pm2 start polymarket-bot
+```
+
+Restart the bot:
+
+```bash
+pm2 restart polymarket-bot
+```
+
+Show status:
+
+```bash
+pm2 status
+```
+
+Show logs:
+
+```bash
+pm2 logs polymarket-bot
+```
+
+## Update The Bot
+
+```bash
+cd /opt/bots/polymarket-updown-bot
+pm2 stop polymarket-bot
+git pull
+npm ci
+npm run build
+pm2 start polymarket-bot
+```
+
+If the bot is not managed by PM2, stop the manual `npm run live` process first.
+
+## Trade And Stats Files
+
+The bot writes resolved trades to:
+
+```text
+trades.csv
+```
+
+The bot writes aggregate statistics to:
+
+```text
+stats.csv
+```
+
+These files can be opened in Excel or imported into Google Sheets.
+
+`trades.csv` contains one row per resolved trade.
+
+`stats.csv` contains aggregate rows for:
+
+- `TOTAL`
+- `BASE`
+- `RETRY`
+- `UP`
+- `DOWN`
+- `BASE_UP`
+- `BASE_DOWN`
+- `RETRY_UP`
+- `RETRY_DOWN`
+
+## Important Safety Rules
+
+- Run only one bot instance at a time.
+- Do not run `npm run live` while PM2 is also running the bot.
+- Use a separate wallet with limited funds.
+- Keep `MAX_DAILY_LOSS_USD`, `MAX_TRADES_PER_DAY`, and `MAX_STAKE_USD` conservative.
+- Check `pm2 logs polymarket-bot` after every deploy or config change.
+- Keep Polymarket's own auto-redeem wins enabled in the UI.
+- Do not run live trading from a blocked region.
+
+## Troubleshooting
+
+If the bot does not start:
+
+```bash
+pm2 logs polymarket-bot
+```
+
+If dependencies are broken:
+
+```bash
+rm -rf node_modules
+npm ci
+npm run build
+```
+
+If live orders are rejected with a geoblock error:
+
+```bash
+curl https://polymarket.com/api/geoblock
+```
+
+If it says blocked, use a server in an allowed region. Do not try to bypass Polymarket restrictions.
+
+If PM2 does not restart after reboot:
+
+```bash
+pm2 save
+pm2 startup
+```
+
+Run the command that PM2 prints.
