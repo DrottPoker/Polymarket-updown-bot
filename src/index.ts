@@ -203,8 +203,11 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         await cancelPendingLiveOrder();
       }
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
-        logSkip(`${new Date(candle.openTime).toISOString()} live order was not filled; candle will not update retry state`);
-        strategy.processClosedCandleWithoutTrade(candle);
+        const strategyOnlyTrade = resolvePaperTrade(pendingTrade, candle);
+        logSkip(
+          `${new Date(candle.openTime).toISOString()} live order was not filled; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
+        );
+        strategy.recordTradeResult(strategyOnlyTrade, candle);
         pendingTrade = null;
         pendingLiveOrder = null;
         lastProcessedClosedCandleOpenTime = candle.openTime;

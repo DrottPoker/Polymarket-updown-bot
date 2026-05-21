@@ -14,6 +14,13 @@ import { AppConfig } from "./config";
 import { findPolymarketMarketForTrade } from "./polymarketMarket";
 import { LiveOrder, PaperTrade } from "./types";
 
+type OrderDetails = {
+  status?: string;
+  size_matched?: string;
+  matched_amount?: string;
+  associate_trades?: string[];
+};
+
 function toPrivateKey(value: string): `0x${string}` {
   if (!value.startsWith("0x")) {
     throw new Error("POLYMARKET_PRIVATE_KEY must start with 0x");
@@ -76,6 +83,21 @@ function responseHasFill(response: unknown): boolean {
   const maybeOrder = response as Partial<OrderResponse>;
   const status = maybeOrder.status?.toLowerCase();
   return Boolean(maybeOrder.tradeIDs?.length) || status === "matched" || status === "filled";
+}
+
+function orderDetailsHasFill(order: OrderDetails | null): boolean {
+  if (!order) {
+    return false;
+  }
+
+  const status = order.status?.toLowerCase();
+  const matchedSize = Number(order.size_matched ?? order.matched_amount ?? 0);
+  return (
+    status === "matched" ||
+    status === "filled" ||
+    (Number.isFinite(matchedSize) && matchedSize > 0) ||
+    Boolean(order.associate_trades?.length)
+  );
 }
 
 function getTickSize(value: string): TickSize {
@@ -295,6 +317,15 @@ export class PolymarketLiveExecutor {
     }
 
     const client = await this.getTradingClient();
+    try {
+      const orderDetails = (await client.getOrder(order.orderId)) as OrderDetails | null;
+      if (orderDetailsHasFill(orderDetails)) {
+        return true;
+      }
+    } catch {
+      // Fall back to trade search below. CLOB may stop returning an order after cancel/expiry.
+    }
+
     const trades = await client.getTrades({ asset_id: order.tokenId }, true);
     return trades.some(
       (trade) =>
