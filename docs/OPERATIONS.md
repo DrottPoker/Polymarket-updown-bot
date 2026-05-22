@@ -120,7 +120,7 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 The no-trade window blocks new entries only. The bot still manages already-open orders, cancels due orders, resolves results, and keeps strategy state current. The time window is checked against the target contract candle open time, so early entry will also be blocked for a contract that opens inside the window.
 
-Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already filled.
+Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already fully filled.
 
 ## Google Sheets Logging
 
@@ -209,6 +209,10 @@ Ctrl + C
 ```
 
 Do not run manual live mode at the same time as PM2.
+
+When a live order fills after it was first posted as `filled: false`, the bot logs `[LIVE_FILL]` once authenticated CLOB trade records show successful matched size for the specific order id. The bot checks for a full fill before sending a due cancel, so already-filled orders should not be canceled just because the initial post response said `filled: false`.
+
+The initial order response status is not enough to count a live trade. If the order is not fully matched, the bot cancels it when due, updates strategy state hypothetically, and does not write a real trade row to Google Sheets or local CSV.
 
 ## Run 24/7 With PM2
 

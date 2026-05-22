@@ -1,25 +1,12 @@
-import {
-  ApiKeyCreds,
-  Chain,
-  ClobClient,
-  OrderResponse,
-  OrderType,
-  Side,
-  SignatureTypeV2,
-  TickSize,
-} from "@polymarket/clob-client-v2";
+import { Chain, ClobClient, OrderType, Side, SignatureTypeV2 } from "@polymarket/clob-client-v2";
+import type { ApiKeyCreds, OpenOrder, OrderResponse, TickSize, Trade } from "@polymarket/clob-client-v2";
 import { createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { AppConfig } from "../config/appConfig";
 import { LiveOrder, PaperTrade } from "../domain/types";
 import { findPolymarketMarketForTrade } from "./marketDiscovery";
 
-type OrderDetails = {
-  status?: string;
-  size_matched?: string;
-  matched_amount?: string;
-  associate_trades?: string[];
-};
+type OrderDetails = Pick<OpenOrder, "status" | "associate_trades">;
 
 function toPrivateKey(value: string): `0x${string}` {
   if (!value.startsWith("0x")) {
@@ -75,29 +62,55 @@ function getOrderStatus(response: unknown): string | undefined {
   return maybeOrder.status;
 }
 
-function responseHasFill(response: unknown): boolean {
+function parsePositiveNumber(value: string | number | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function statusBlocksFill(status: string | undefined): boolean {
+  const normalized = status?.toLowerCase() ?? "";
+  return ["fail", "reject", "cancel", "error", "invalid", "pending", "retry"].some((blockedStatus) =>
+    normalized.includes(blockedStatus)
+  );
+}
+
+function responseTradeIds(response: unknown): string[] {
   if (!response || typeof response !== "object") {
-    return false;
+    return [];
   }
 
   const maybeOrder = response as Partial<OrderResponse>;
-  const status = maybeOrder.status?.toLowerCase();
-  return Boolean(maybeOrder.tradeIDs?.length) || status === "matched" || status === "filled";
+  return maybeOrder.tradeIDs ?? [];
 }
 
-function orderDetailsHasFill(order: OrderDetails | null): boolean {
-  if (!order) {
-    return false;
+function orderDetailsTradeIds(order: OrderDetails | null): string[] {
+  if (!order || statusBlocksFill(order.status)) {
+    return [];
   }
 
-  const status = order.status?.toLowerCase();
-  const matchedSize = Number(order.size_matched ?? order.matched_amount ?? 0);
-  return (
-    status === "matched" ||
-    status === "filled" ||
-    (Number.isFinite(matchedSize) && matchedSize > 0) ||
-    Boolean(order.associate_trades?.length)
-  );
+  return order.associate_trades ?? [];
+}
+
+function tradeCanCountAsFill(trade: Trade): boolean {
+  return !statusBlocksFill(trade.status) && !(trade.err_msg && trade.err_msg.trim().length > 0);
+}
+
+function tradeFilledSizeForOrder(order: LiveOrder, trade: Trade): number {
+  if (!tradeCanCountAsFill(trade)) {
+    return 0;
+  }
+
+  if (trade.taker_order_id === order.orderId) {
+    return parsePositiveNumber(trade.size);
+  }
+
+  return (trade.maker_orders ?? [])
+    .filter((makerOrder) => makerOrder.order_id === order.orderId)
+    .reduce((filledSize, makerOrder) => filledSize + parsePositiveNumber(makerOrder.matched_amount), 0);
+}
+
+function isFullyFilled(order: LiveOrder, filledSize: number): boolean {
+  return filledSize >= order.size * 0.999;
 }
 
 function getTickSize(value: string): TickSize {
@@ -165,6 +178,7 @@ export class PolymarketLiveExecutor {
         },
       },
       filled: false,
+      filledSize: 0,
       canceled: false,
     };
   }
@@ -221,7 +235,8 @@ export class PolymarketLiveExecutor {
       postedAt: Date.now(),
       cancelAt: trade.candleOpenTime + this.config.tradeWindowSeconds * 1000,
       response,
-      filled: responseHasFill(response),
+      filled: false,
+      filledSize: 0,
       canceled: false,
     };
   }
@@ -229,6 +244,15 @@ export class PolymarketLiveExecutor {
   async cancelIfDue(order: LiveOrder, now: number): Promise<LiveOrder> {
     if (order.canceled || order.filled || !order.orderId || now < order.cancelAt) {
       return order;
+    }
+
+    const filledSize = await this.getFilledSizeOrZero(order);
+    if (isFullyFilled(order, filledSize)) {
+      return {
+        ...order,
+        filledSize,
+        filled: true,
+      };
     }
 
     return this.cancelOrder(order);
@@ -239,11 +263,22 @@ export class PolymarketLiveExecutor {
       return order;
     }
 
+    const filledSizeBeforeCancel = await this.getFilledSizeOrZero(order);
+    if (isFullyFilled(order, filledSizeBeforeCancel)) {
+      return {
+        ...order,
+        filledSize: filledSizeBeforeCancel,
+        filled: true,
+      };
+    }
+
     const client = await this.getTradingClient();
     const cancelResponse = await client.cancelOrder({ orderID: order.orderId });
+    const filledSizeAfterCancel = await this.getFilledSizeOrZero(order);
     return {
       ...order,
-      filled: order.filled || (await this.hasFill(order)),
+      filled: order.filled || isFullyFilled(order, filledSizeAfterCancel),
+      filledSize: Math.max(filledSizeBeforeCancel, filledSizeAfterCancel),
       canceled: true,
       cancelResponse,
     };
@@ -254,9 +289,11 @@ export class PolymarketLiveExecutor {
       return order;
     }
 
+    const filledSize = await this.getFilledSizeOrZero(order);
     return {
       ...order,
-      filled: await this.hasFill(order),
+      filled: isFullyFilled(order, filledSize),
+      filledSize,
     };
   }
 
@@ -311,26 +348,44 @@ export class PolymarketLiveExecutor {
     };
   }
 
-  private async hasFill(order: LiveOrder): Promise<boolean> {
+  private async getFilledSize(order: LiveOrder): Promise<number> {
     if (!order.orderId) {
-      return false;
+      return 0;
     }
 
     const client = await this.getTradingClient();
+    const tradeIds = new Set(responseTradeIds(order.response));
     try {
       const orderDetails = (await client.getOrder(order.orderId)) as OrderDetails | null;
-      if (orderDetailsHasFill(orderDetails)) {
-        return true;
-      }
+      orderDetailsTradeIds(orderDetails).forEach((tradeId) => tradeIds.add(tradeId));
     } catch {
-      // Fall back to trade search below. CLOB may stop returning an order after cancel/expiry.
+      // CLOB may stop returning an order after cancel/expiry. Trade lookup below is the fill source.
     }
 
-    const trades = await client.getTrades({ asset_id: order.tokenId }, true);
-    return trades.some(
-      (trade) =>
-        trade.taker_order_id === order.orderId ||
-        trade.maker_orders.some((makerOrder) => makerOrder.order_id === order.orderId)
+    const tradesById = new Map<string, Trade>();
+    const assetTrades = await client.getTrades({ asset_id: order.tokenId }, true);
+    assetTrades.forEach((trade) => tradesById.set(trade.id, trade));
+
+    for (const tradeId of tradeIds) {
+      if (tradesById.has(tradeId)) {
+        continue;
+      }
+
+      const trades = await client.getTrades({ id: tradeId }, true);
+      trades.forEach((trade) => tradesById.set(trade.id, trade));
+    }
+
+    return Array.from(tradesById.values()).reduce(
+      (filledSize, trade) => filledSize + tradeFilledSizeForOrder(order, trade),
+      0
     );
+  }
+
+  private async getFilledSizeOrZero(order: LiveOrder): Promise<number> {
+    try {
+      return await this.getFilledSize(order);
+    } catch {
+      return 0;
+    }
   }
 }

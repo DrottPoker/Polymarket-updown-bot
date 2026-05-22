@@ -84,6 +84,7 @@ export type LiveOrder = {
   cancelAt: number;
   response: unknown;
   filled: boolean;
+  filledSize?: number;
   canceled: boolean;
   cancelResponse?: unknown;
 };

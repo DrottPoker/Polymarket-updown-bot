@@ -267,8 +267,8 @@ sleep pollMs
 4. Order book metadata is checked.
 5. A GTC limit BUY order is posted.
 6. The bot tracks the order until fill, cancel time, or candle resolution.
-7. If the order is filled, the resolved trade is logged to the configured log targets.
-8. If the order is not filled, the strategy state still updates hypothetically, but no real trade row is created.
+7. If the order is fully filled according to authenticated successful CLOB trade records, the resolved trade is logged to the configured log targets.
+8. If the order is not fully filled, the strategy state still updates hypothetically, but no real trade row is created.
 
 ## Early Entry Flow
 

@@ -6,6 +6,7 @@ import {
   logError,
   logLiveCancel,
   logLiveDryRun,
+  logLiveFill,
   logLiveOrder,
   logResult,
   logSignal,
@@ -114,6 +115,14 @@ function clearPendingEarlyEntryTracking(): void {
   pendingEarlyEntryFinalValidationDone = false;
 }
 
+function liveFillProgress(order: LiveOrder | null): string {
+  if (!order || !order.filledSize || order.filledSize <= 0) {
+    return "";
+  }
+
+  return `; matched ${order.filledSize.toFixed(4)} of ${order.size.toFixed(4)} shares`;
+}
+
 function clockTimeToMinutes(value: string): number {
   const [hours, minutes] = value.split(":").map(Number);
   return hours * 60 + minutes;
@@ -198,7 +207,11 @@ async function cancelPendingLiveOrder(): Promise<void> {
   }
 
   try {
+    const wasFilled = pendingLiveOrder.filled;
     const updatedOrder = await liveExecutor.cancelOrder(pendingLiveOrder);
+    if (!wasFilled && updatedOrder.filled) {
+      logLiveFill(updatedOrder);
+    }
     if (!pendingLiveOrder.canceled && updatedOrder.canceled) {
       logLiveCancel(updatedOrder);
     }
@@ -214,7 +227,11 @@ async function refreshPendingLiveOrderFillStatus(): Promise<void> {
   }
 
   try {
+    const wasFilled = pendingLiveOrder.filled;
     pendingLiveOrder = await liveExecutor.refreshFillStatus(pendingLiveOrder);
+    if (!wasFilled && pendingLiveOrder.filled) {
+      logLiveFill(pendingLiveOrder);
+    }
   } catch (error) {
     logError(error);
   }
@@ -226,7 +243,11 @@ async function cancelPendingLiveOrderIfDue(now: number): Promise<void> {
   }
 
   try {
+    const wasFilled = pendingLiveOrder.filled;
     const updatedOrder = await liveExecutor.cancelIfDue(pendingLiveOrder, now);
+    if (!wasFilled && updatedOrder.filled) {
+      logLiveFill(updatedOrder);
+    }
     if (!pendingLiveOrder.canceled && updatedOrder.canceled) {
       logLiveCancel(updatedOrder);
     }
@@ -461,7 +482,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
         const strategyOnlyTrade = resolvePaperTrade(pendingTrade, candle);
         logSkip(
-          `${new Date(candle.openTime).toISOString()} live order was not filled; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
+          `${new Date(candle.openTime).toISOString()} live order was not fully filled${liveFillProgress(pendingLiveOrder)}; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
         );
         strategy.recordTradeResult(strategyOnlyTrade, candle);
         pendingTrade = null;

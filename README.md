@@ -138,7 +138,7 @@ When `earlyEntryEnabled=true`, the bot checks the forming candle in three stages
 
 For BASE setups, a third green trend candle places `DOWN` on the next contract; a third red trend candle places `UP`. For RETRY setups, the same staged checks apply when the forming candle continues the retry trend and would make retry ready.
 
-If a primary or secondary early-entry order is already pending, the final check still runs at `earlyEntryOrderSecondsBeforeClose`. If the forming candle no longer produces the same setup and direction, the bot cancels the pending order when it is not already filled.
+If a primary or secondary early-entry order is already pending, the final check still runs at `earlyEntryOrderSecondsBeforeClose`. If the forming candle no longer produces the same setup and direction, the bot cancels the pending order when it is not already fully filled.
 
 ## No-Trade Window
 
@@ -162,7 +162,9 @@ Real live mode additionally uses:
 
 - `@polymarket/clob-client-v2` to submit a GTC limit BUY at `entryCents`.
 - Automatic cancel at `candleOpenTime + tradeWindowSeconds`.
-- Fill checking through authenticated CLOB order/trade data; an unfilled canceled order updates strategy state hypothetically but does not create a CSV trade row.
+- Fill checking through authenticated CLOB order and trade data before any due cancel is sent.
+- Full-fill confirmation based on successful CLOB trade records for the specific order id. The initial post response status is not enough to count a live trade as filled.
+- An unfilled or partially filled canceled order updates strategy state hypothetically but does not create a trade row.
 
 To dry-run against Polymarket without placing orders, use `npm run dry-run`. For manual config, set this in `bot.config.json`:
 

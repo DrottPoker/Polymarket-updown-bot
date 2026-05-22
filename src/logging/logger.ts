@@ -350,6 +350,19 @@ export function logLiveCancel(order: LiveOrder): void {
   console.log(`market: ${order.marketSlug}`);
   console.log(`order id: ${order.orderId ?? "unknown"}`);
   console.log(`filled: ${order.filled}`);
+  if (order.filledSize && order.filledSize > 0) {
+    console.log(`filled size: ${order.filledSize.toFixed(4)} of ${order.size.toFixed(4)}`);
+  }
+}
+
+export function logLiveFill(order: LiveOrder): void {
+  console.log("");
+  console.log("[LIVE_FILL]");
+  console.log(`market: ${order.marketSlug}`);
+  console.log(`order id: ${order.orderId ?? "unknown"}`);
+  console.log(`price: ${order.price.toFixed(4)}`);
+  console.log(`size: ${order.size.toFixed(4)}`);
+  console.log(`filled size: ${(order.filledSize ?? order.size).toFixed(4)}`);
 }
 
 export function logSkip(message: string): void {

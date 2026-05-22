@@ -152,7 +152,7 @@ If one stage opens a trade for the target candle, the remaining stages for that 
 
 When a primary or secondary stage opens a pending order, the final stage is still used as a safety validation. At `earlyEntryOrderSecondsBeforeClose`, the bot checks the forming candle again with color-only requirements. If the signal no longer matches the pending trade kind and direction, the bot cancels the pending order when possible and clears the pending trade.
 
-If the order is already filled by the time final validation fails, it cannot be canceled. The bot keeps managing the trade until candle close and logs that the order was already filled.
+If the order is already fully filled by the time final validation fails, it cannot be canceled. The bot keeps managing the trade until candle close and logs that the order was already filled.
 
 ## Startup Candle Skip
 
@@ -258,7 +258,9 @@ The bot keeps polling while the order is pending.
 
 If the order fills, the resolved trade is logged after candle close.
 
-If the order does not fill, the order is canceled when due. The strategy state is still updated hypothetically after candle close, but no real trade row is written.
+Before a due cancel is sent, the bot checks authenticated CLOB trade records for successful matched size on the specific order id. If the order is already fully filled, it logs `[LIVE_FILL]` and does not send the cancel.
+
+If the order does not fully fill, the order is canceled when due. The strategy state is still updated hypothetically after candle close, but no real trade row is written.
 
 ## Runtime Risk Limits
 

@@ -55,7 +55,7 @@ When a live signal appears, the bot finds the correct Polymarket Up/Down contrac
 
 If the order fills, the bot resolves the trade after candle close and logs the result.
 
-If the order does not fill, the bot cancels it after the configured trade window. The strategy can still update hypothetically so retry behavior remains consistent, but the unfilled order is not counted as a real trade in the spreadsheet log.
+If the order does not fully fill, the bot cancels it after the configured trade window. The strategy can still update hypothetically so retry behavior remains consistent, but the unfilled order is not counted as a real trade in the spreadsheet log.
 
 ## Operating Model
 
