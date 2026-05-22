@@ -13,7 +13,7 @@ The architecture is intentionally small and direct:
 - Strategy state is owned by one strategy class.
 - The main loop owns trade lifecycle decisions.
 - Live order handling is isolated from strategy logic.
-- CSV logging is the only local persistence layer.
+- Optional CSV logging is the only local persistence layer.
 
 ## Source Layout
 
@@ -175,7 +175,7 @@ It tracks live order placements and resolved PnL in memory for the current proce
 
 ### `src/logging/logger.ts`
 
-Owns all console and CSV output.
+Owns all console and optional CSV output.
 
 It handles:
 
@@ -188,8 +188,8 @@ It handles:
 - Cancel logs.
 - Skip logs.
 - Error logs.
-- Trade CSV creation and migration.
-- Stats CSV refresh.
+- Trade CSV creation and migration when local CSV logging is enabled.
+- Stats CSV refresh when local CSV logging is enabled.
 
 ### `src/logging/googleSheetsLogger.ts`
 
@@ -215,8 +215,8 @@ load config
 create strategy
 create risk manager
 create live executor if needed
-ensure trade CSV
-refresh stats CSV
+ensure local CSV logs if enabled
+refresh local stats CSV if enabled
 poll candles
 warm up strategy from closed candles
 skip the candle already in progress at startup
@@ -246,7 +246,7 @@ sleep pollMs
 2. `paperBroker` creates a paper trade.
 3. The bot waits until the trade candle closes.
 4. `paperBroker` resolves the result.
-5. `logger` appends the trade row and refreshes stats.
+5. The configured loggers append the trade row and refresh stats.
 6. Strategy records the result and updates retry/reset state.
 
 ### Live Dry-Run Mode
@@ -267,8 +267,8 @@ sleep pollMs
 4. Order book metadata is checked.
 5. A GTC limit BUY order is posted.
 6. The bot tracks the order until fill, cancel time, or candle resolution.
-7. If the order is filled, the resolved trade is logged to CSV.
-8. If the order is not filled, the strategy state still updates hypothetically, but no real CSV trade row is created.
+7. If the order is filled, the resolved trade is logged to the configured log targets.
+8. If the order is not filled, the strategy state still updates hypothetically, but no real trade row is created.
 
 ## Early Entry Flow
 
@@ -295,7 +295,7 @@ If a signal appears during the blocked window:
 - No paper/live order is opened.
 - The signal is tracked as a strategy-only hypothetical trade.
 - The strategy still receives the hypothetical result after candle close.
-- No real trade row is written to `trades.csv`.
+- No real trade row is written to the configured trade log.
 
 This keeps retry state consistent without placing unwanted trades.
 
@@ -309,9 +309,11 @@ This keeps retry state consistent without placing unwanted trades.
 
 ### Runtime Files
 
-`trades.csv` contains resolved real or paper trades.
+`trades.csv` contains resolved real or paper trades when `localCsvLoggingEnabled` is `true`.
 
-`stats.csv` contains aggregate statistics generated from `trades.csv`.
+`stats.csv` contains aggregate statistics generated from `trades.csv` when `localCsvLoggingEnabled` is `true`.
+
+When Google Sheets is enabled and `localCsvLoggingEnabled` is `false`, resolved trades are written only to the configured Google Sheets `Trades` tab and stats are derived only from that tab.
 
 Both files are runtime output and should not be edited by code changes unless the task is specifically about local log repair.
 
@@ -343,8 +345,8 @@ npm dependencies
 PM2 process manager
 local bot.config.json
 local .env
-CSV files on local disk
-optional Google spreadsheet mirror
+optional CSV files on local disk
+optional Google spreadsheet log
 ```
 
 PM2 keeps the process running after SSH disconnects and can restore it after reboot.

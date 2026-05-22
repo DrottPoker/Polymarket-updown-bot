@@ -339,6 +339,24 @@ async function syncGoogleSheetsTrade(trade: ResolvedPaperTrade, liveOrder?: Live
   }
 }
 
+function initializeLocalCsvLogs(): void {
+  if (!config.localCsvLoggingEnabled) {
+    return;
+  }
+
+  ensureCsvLog(config.logFile);
+  refreshStatsLog(config.logFile, config.statsFile);
+}
+
+function writeLocalTradeLogs(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): void {
+  if (!config.localCsvLoggingEnabled) {
+    return;
+  }
+
+  appendTradeResult(config.logFile, trade, liveOrder);
+  refreshStatsLog(config.logFile, config.statsFile);
+}
+
 async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<void> {
   if (!config.earlyEntryEnabled || pendingTrade || pendingStrategyOnlyTrade) {
     return;
@@ -455,8 +473,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
 
       const resolvedTrade = resolvePaperTrade(pendingTrade, candle);
       logResult(resolvedTrade);
-      appendTradeResult(config.logFile, resolvedTrade, pendingLiveOrder);
-      refreshStatsLog(config.logFile, config.statsFile);
+      writeLocalTradeLogs(resolvedTrade, pendingLiveOrder);
       await syncGoogleSheetsTrade(resolvedTrade, pendingLiveOrder);
       strategy.recordTradeResult(resolvedTrade, candle);
       riskManager.recordResolvedTrade(resolvedTrade);
@@ -532,8 +549,7 @@ async function tick(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  ensureCsvLog(config.logFile);
-  refreshStatsLog(config.logFile, config.statsFile);
+  initializeLocalCsvLogs();
   logStartup(config);
   await initializeGoogleSheets();
 

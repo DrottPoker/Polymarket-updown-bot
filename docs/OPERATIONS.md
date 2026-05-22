@@ -87,6 +87,7 @@ Recommended:
 {
   "logFile": "trades.csv",
   "statsFile": "stats.csv",
+  "localCsvLoggingEnabled": true,
   "earlyEntryEnabled": true,
   "earlyEntryPrimarySecondsBeforeClose": 15,
   "earlyEntryPrimaryMinMovePct": 0.05,
@@ -142,6 +143,7 @@ Enable Google Sheets logging in `bot.config.json`:
 
 ```json
 {
+  "localCsvLoggingEnabled": false,
   "googleSheetsEnabled": true,
   "googleSheetsSpreadsheetId": "SPREADSHEET_ID",
   "googleSheetsTradesSheetName": "Trades",
@@ -157,6 +159,8 @@ GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\
 ```
 
 Google Sheets stats are calculated from the configured `Trades` tab in Google Sheets. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
+
+When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is recommended when Google Sheets is your main trade log on a VPS.
 
 To clear the Google Sheets trade log and reset the Google Sheets dashboard:
 
@@ -289,15 +293,25 @@ pm2 start polymarket-bot
 
 If the bot is not managed by PM2, stop the manual `npm run live` process first.
 
+If `stats.csv` blocks an update because it was changed locally on the VPS, back it up or discard it once before pulling the version where CSV logging is disabled:
+
+```bash
+cp stats.csv stats.csv.backup
+git checkout -- stats.csv
+git pull
+```
+
 ## Trade And Stats Files
 
-The bot writes resolved trades to:
+Local CSV files are optional. They are only used when `localCsvLoggingEnabled` is `true`.
+
+When enabled, the bot writes resolved trades to:
 
 ```text
 trades.csv
 ```
 
-The bot writes aggregate statistics to:
+When enabled, the bot writes aggregate statistics to:
 
 ```text
 stats.csv

@@ -15,6 +15,7 @@ type BotConfigFile = Partial<{
   candleLimit: number;
   logFile: string;
   statsFile: string;
+  localCsvLoggingEnabled: boolean;
   binanceBaseUrl: string;
   ignoreDojiInTrend: boolean;
   useLossRetryLogic: boolean;
@@ -66,6 +67,7 @@ export type AppConfig = {
   candleLimit: number;
   logFile: string;
   statsFile: string;
+  localCsvLoggingEnabled: boolean;
   binanceBaseUrl: string;
   ignoreDojiInTrend: boolean;
   useLossRetryLogic: boolean;
@@ -231,6 +233,7 @@ export function loadConfig(): AppConfig {
     candleLimit: readNumber(configFile, "candleLimit", 300),
     logFile: readString(configFile, "logFile", "trades.csv"),
     statsFile: readString(configFile, "statsFile", "stats.csv"),
+    localCsvLoggingEnabled: readBoolean(configFile, "localCsvLoggingEnabled", true),
     binanceBaseUrl: readString(configFile, "binanceBaseUrl", "https://api.binance.com"),
     ignoreDojiInTrend: readBoolean(configFile, "ignoreDojiInTrend", true),
     useLossRetryLogic: readBoolean(configFile, "useLossRetryLogic", true),
@@ -401,6 +404,10 @@ function validateConfig(config: AppConfig): void {
 
   if (config.googleSheetsEnabled) {
     validateGoogleSheetsConfig(config);
+  }
+
+  if (!config.localCsvLoggingEnabled && !config.googleSheetsEnabled) {
+    throw new Error("localCsvLoggingEnabled=false requires googleSheetsEnabled=true so resolved trades have a log target");
   }
 
   if (config.executionMode === "live") {

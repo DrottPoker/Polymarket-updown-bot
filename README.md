@@ -52,7 +52,7 @@ Runtime scripts can temporarily override the configured execution mode. Do not p
 src/
   config/       Config loading and validation
   domain/       Shared domain types
-  logging/      Console, trade CSV, and stats CSV output
+  logging/      Console, optional CSV, and Google Sheets output
   marketData/   Binance and Polymarket/Chainlink candle sources
   polymarket/   Gamma market discovery and CLOB live execution
   trading/      Strategy, simulated trades, and runtime risk checks
@@ -89,11 +89,13 @@ When using `polymarket_chainlink`, `polymarketAssetSlug` selects the Chainlink s
 
 ## Spreadsheet Logs
 
-The bot writes every resolved trade to `logFile` as a spreadsheet-friendly CSV. New live trades include Polymarket metadata such as market slug, token id, order id, live status, fill status, live price, and live size.
+Local CSV logging is controlled by `localCsvLoggingEnabled`. When it is `true`, the bot writes every resolved trade to `logFile` as a spreadsheet-friendly CSV. New live trades include Polymarket metadata such as market slug, token id, order id, live status, fill status, live price, and live size.
 
-After each resolved trade, the bot rewrites `statsFile` with aggregate statistics for `TOTAL`, `BASE`, `RETRY`, `UP`, `DOWN`, `BASE_UP`, `BASE_DOWN`, `RETRY_UP`, and `RETRY_DOWN`.
+When local CSV logging is enabled, the bot rewrites `statsFile` after each resolved trade with aggregate statistics for `TOTAL`, `BASE`, `RETRY`, `UP`, `DOWN`, `BASE_UP`, `BASE_DOWN`, `RETRY_UP`, and `RETRY_DOWN`.
 
-Both files can be opened directly in Excel or imported into Google Sheets.
+Those files can be opened directly in Excel or imported into Google Sheets.
+
+When Google Sheets logging is enabled, set `localCsvLoggingEnabled` to `false` if you want the VPS to avoid creating or changing local `trades.csv` and `stats.csv` files.
 
 ## Google Sheets Logging
 
@@ -103,6 +105,7 @@ Enable it in `bot.config.json`:
 
 ```json
 {
+  "localCsvLoggingEnabled": false,
   "googleSheetsEnabled": true,
   "googleSheetsSpreadsheetId": "your-spreadsheet-id",
   "googleSheetsTradesSheetName": "Trades",

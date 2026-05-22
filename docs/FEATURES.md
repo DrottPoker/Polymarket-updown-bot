@@ -14,7 +14,7 @@ Configured with:
 }
 ```
 
-Paper mode does not touch Polymarket trading APIs. It fetches candles, runs the strategy, simulates entries at `entryCents`, resolves trades after candle close, and writes results to CSV.
+Paper mode does not touch Polymarket trading APIs. It fetches candles, runs the strategy, simulates entries at `entryCents`, resolves trades after candle close, and writes results to the configured log target.
 
 Use paper mode for strategy checks and local development.
 
@@ -184,7 +184,7 @@ When a signal is blocked:
 - The bot does not place an order.
 - The bot still tracks the signal as a strategy-only hypothetical trade.
 - Retry state stays aligned with what would have happened.
-- No real trade row is added to `trades.csv`.
+- No real trade row is added to the configured trade log.
 
 ## Polymarket/Chainlink Candle Source
 
@@ -284,17 +284,18 @@ Risk checks block live and dry-run orders when:
 
 Risk counters are in-memory for the running process.
 
-## Spreadsheet Trade Log
+## Local CSV Trade Log
 
 Configured with:
 
 ```json
 {
+  "localCsvLoggingEnabled": true,
   "logFile": "trades.csv"
 }
 ```
 
-The bot writes one row per resolved paper or filled live trade.
+When `localCsvLoggingEnabled` is `true`, the bot writes one row per resolved paper or filled live trade.
 
 The trade log includes:
 
@@ -312,17 +313,18 @@ The trade log includes:
 - Base or retry kind.
 - Live market metadata when available.
 
-## Spreadsheet Stats
+## Local CSV Stats
 
 Configured with:
 
 ```json
 {
+  "localCsvLoggingEnabled": true,
   "statsFile": "stats.csv"
 }
 ```
 
-After each resolved trade, the bot rebuilds aggregate stats from `trades.csv`.
+When `localCsvLoggingEnabled` is `true`, the bot rebuilds aggregate stats from `trades.csv` after each resolved trade.
 
 Stats scopes:
 
@@ -344,6 +346,7 @@ Configured with:
 
 ```json
 {
+  "localCsvLoggingEnabled": false,
   "googleSheetsEnabled": true,
   "googleSheetsSpreadsheetId": "your-spreadsheet-id",
   "googleSheetsTradesSheetName": "Trades",
@@ -362,7 +365,7 @@ GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\
 
 The bot creates the configured `Trades` and `Stats` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from rows already present in that same Google Sheets `Trades` tab.
 
-Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
+Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard. When Google Sheets is the main production log, `localCsvLoggingEnabled` can be set to `false` so the bot does not create or change local CSV files.
 
 Run this to clear the Google Sheets trade log and restart the Google Sheets dashboard from zero:
 
@@ -372,7 +375,7 @@ npm run sheets:clear
 
 The clear script only affects the configured Google Sheets `Trades` and `Stats` tabs. It does not modify local CSV files.
 
-Google Sheets failures are logged as errors, but they do not stop local CSV logging or trade management.
+Google Sheets failures are logged as errors, but they do not stop trade management. If local CSV logging is enabled, it continues separately.
 
 ## Config Separation
 

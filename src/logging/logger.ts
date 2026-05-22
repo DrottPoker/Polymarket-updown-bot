@@ -268,8 +268,11 @@ export function logStartup(config: AppConfig): void {
     console.log(`max live window: ${config.maxLiveTradeWindowSeconds}s`);
   }
   console.log(`poll: ${config.pollMs}ms`);
-  console.log(`log: ${config.logFile}`);
-  console.log(`stats: ${config.statsFile}`);
+  console.log(`local csv logging: ${config.localCsvLoggingEnabled}`);
+  if (config.localCsvLoggingEnabled) {
+    console.log(`log: ${config.logFile}`);
+    console.log(`stats: ${config.statsFile}`);
+  }
   console.log(`google sheets: ${config.googleSheetsEnabled}`);
   if (config.googleSheetsEnabled) {
     console.log(`google trades sheet: ${config.googleSheetsTradesSheetName}`);

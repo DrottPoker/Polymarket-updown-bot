@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+bot.config.json
 trades.csv
 stats.csv
 npm-debug.log*

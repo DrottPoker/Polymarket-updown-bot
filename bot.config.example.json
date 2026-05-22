@@ -10,6 +10,7 @@
   "candleLimit": 300,
   "logFile": "trades.csv",
   "statsFile": "stats.csv",
+  "localCsvLoggingEnabled": true,
   "binanceBaseUrl": "https://api.binance.com",
   "ignoreDojiInTrend": false,
   "useLossRetryLogic": true,
