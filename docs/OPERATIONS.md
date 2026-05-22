@@ -55,42 +55,116 @@ npm ci
 npm run build
 ```
 
-## Configure Environment
+## Configure Bot Settings
 
-Create the local `.env` file:
+Create the local config and secret files:
 
 ```bash
+cp bot.config.example.json bot.config.json
 cp .env.example .env
+nano bot.config.json
 nano .env
 ```
 
-Minimum live settings:
+`bot.config.json` contains normal bot settings. Minimum live settings:
 
-```env
-EXECUTION_MODE=live
-LIVE_TRADING_ENABLED=true
-LIVE_CONFIRMATION=PLACE_REAL_POLYMARKET_ORDERS
-
-POLYGON_RPC_URL=https://...
-POLYMARKET_PRIVATE_KEY=0x...
-POLYMARKET_FUNDER_ADDRESS=0x...
-POLYMARKET_SIGNATURE_TYPE=3
-
-STAKE_USD=5
-MAX_STAKE_USD=5
-MAX_DAILY_LOSS_USD=25
-MAX_TRADES_PER_DAY=20
+```json
+{
+  "priceSource": "polymarket_chainlink",
+  "liveTradingEnabled": true,
+  "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS",
+  "polymarketSignatureType": 3,
+  "stakeUsd": 5,
+  "maxStakeUsd": 5,
+  "maxDailyLossUsd": 25,
+  "maxTradesPerDay": 20
+}
 ```
 
 Recommended:
 
-```env
-LOG_FILE=trades.csv
-STATS_FILE=stats.csv
-EARLY_ENTRY_ENABLED=true
+```json
+{
+  "logFile": "trades.csv",
+  "statsFile": "stats.csv",
+  "earlyEntryEnabled": true,
+  "earlyEntryPrimarySecondsBeforeClose": 15,
+  "earlyEntryPrimaryMinMovePct": 0.05,
+  "earlyEntrySecondarySecondsBeforeClose": 5,
+  "earlyEntrySecondaryMinMovePct": 0.02,
+  "earlyEntryOrderSecondsBeforeClose": 1,
+  "noTradeWindowEnabled": true,
+  "noTradeStart": "23:00",
+  "noTradeEnd": "07:00",
+  "noTradeTimeZone": "Europe/Stockholm"
+}
 ```
 
-Never commit `.env` to GitHub.
+`.env` contains secrets and private/account-specific values only:
+
+```env
+POLYGON_RPC_URL=https://...
+POLYMARKET_PRIVATE_KEY=0x...
+POLYMARKET_FUNDER_ADDRESS=0x...
+CLOB_API_KEY=
+CLOB_SECRET=
+CLOB_PASS_PHRASE=
+GOOGLE_SERVICE_ACCOUNT_EMAIL=
+GOOGLE_PRIVATE_KEY=
+```
+
+Never commit `.env` or `bot.config.json` to GitHub.
+
+`priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
+
+The no-trade window blocks new entries only. The bot still manages already-open orders, cancels due orders, resolves results, and keeps strategy state current. The time window is checked against the target contract candle open time, so early entry will also be blocked for a contract that opens inside the window.
+
+Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already filled.
+
+## Google Sheets Logging
+
+The bot can write trade rows and stats to an existing spreadsheet in Google Drive.
+
+1. Create a Google Cloud service account.
+2. Enable the Google Sheets API for that Google Cloud project.
+3. Create a JSON key for the service account.
+4. Open your spreadsheet in Google Drive.
+5. Share the spreadsheet with the service account email as an editor.
+6. Copy the spreadsheet id from the URL.
+
+The spreadsheet id is the part between `/d/` and `/edit`:
+
+```text
+https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit
+```
+
+Enable Google Sheets logging in `bot.config.json`:
+
+```json
+{
+  "googleSheetsEnabled": true,
+  "googleSheetsSpreadsheetId": "SPREADSHEET_ID",
+  "googleSheetsTradesSheetName": "Trades",
+  "googleSheetsStatsSheetName": "Stats"
+}
+```
+
+Add the service account credentials to `.env`:
+
+```env
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+Google Sheets stats are calculated from the configured `Trades` tab in Google Sheets. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
+
+To clear the Google Sheets trade log and reset the Google Sheets dashboard:
+
+```bash
+npm run sheets:clear
+```
+
+This clears the configured `Trades` tab back to its header row and rebuilds the configured `Stats` tab from that blank trade log. It does not delete or edit local `trades.csv` or `stats.csv`.
 
 ## Dry Run
 
@@ -250,7 +324,7 @@ These files can be opened in Excel or imported into Google Sheets.
 - Run only one bot instance at a time.
 - Do not run `npm run live` while PM2 is also running the bot.
 - Use a separate wallet with limited funds.
-- Keep `MAX_DAILY_LOSS_USD`, `MAX_TRADES_PER_DAY`, and `MAX_STAKE_USD` conservative.
+- Keep `maxDailyLossUsd`, `maxTradesPerDay`, and `maxStakeUsd` conservative.
 - Check `pm2 logs polymarket-bot` after every deploy or config change.
 - Keep Polymarket's own auto-redeem wins enabled in the UI.
 - Do not run live trading from a blocked region.

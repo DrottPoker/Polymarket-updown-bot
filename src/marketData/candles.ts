@@ -1,6 +1,7 @@
 import axios from "axios";
-import { AppConfig } from "./config";
-import { Candle, CandleColor } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { Candle, CandleColor } from "../domain/types";
+import { fetchPolymarketChainlinkCandles } from "./polymarketChainlinkCandles";
 
 type BinanceKline = [
   number,
@@ -63,7 +64,7 @@ export function parseBinanceKline(value: unknown): Candle {
   };
 }
 
-export async function fetchCandles(config: AppConfig, limit = 10): Promise<Candle[]> {
+async function fetchBinanceCandles(config: AppConfig, limit = 10): Promise<Candle[]> {
   const response = await axios.get<unknown[]>("/api/v3/klines", {
     baseURL: config.binanceBaseUrl,
     params: {
@@ -79,4 +80,12 @@ export async function fetchCandles(config: AppConfig, limit = 10): Promise<Candl
   }
 
   return response.data.map(parseBinanceKline).sort((a, b) => a.openTime - b.openTime);
+}
+
+export async function fetchCandles(config: AppConfig, limit = 10): Promise<Candle[]> {
+  if (config.priceSource === "polymarket_chainlink") {
+    return fetchPolymarketChainlinkCandles(config, limit);
+  }
+
+  return fetchBinanceCandles(config, limit);
 }

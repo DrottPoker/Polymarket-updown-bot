@@ -1,5 +1,5 @@
-import { AppConfig } from "./config";
-import { Candle, Direction, ResolvedPaperTrade, StrategyDecision, StrategySignal, TradeKind, TrendColor } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { Candle, Direction, ResolvedPaperTrade, StrategyDecision, StrategySignal, TrendColor } from "../domain/types";
 
 type StrategyStats = {
   totalSignals: number;
@@ -22,6 +22,11 @@ type StrategyStats = {
   blockedCandles: number;
   resetEvents: number;
   dojiTradeLosses: number;
+};
+
+type EarlyEntryCheck = {
+  label: string;
+  minMovePct: number | null;
 };
 
 const emptyStats = (): StrategyStats => ({
@@ -95,8 +100,14 @@ export class TradingViewReversalStrategy {
     return this.evaluateSignal(false);
   }
 
-  getEarlySignalForNextCandle(formingCandle: Candle): StrategyDecision {
-    const retryDecision = this.getEarlyRetrySignalForNextCandle(formingCandle);
+  getEarlySignalForNextCandle(
+    formingCandle: Candle,
+    check: EarlyEntryCheck = {
+      label: "early entry",
+      minMovePct: this.config.earlyEntryPrimaryMinMovePct,
+    }
+  ): StrategyDecision {
+    const retryDecision = this.getEarlyRetrySignalForNextCandle(formingCandle, check);
     if (retryDecision.signal) {
       return retryDecision;
     }
@@ -105,10 +116,10 @@ export class TradingViewReversalStrategy {
       return retryDecision;
     }
 
-    return this.getEarlyBaseSignalForNextCandle(formingCandle);
+    return this.getEarlyBaseSignalForNextCandle(formingCandle, check);
   }
 
-  private getEarlyRetrySignalForNextCandle(formingCandle: Candle): StrategyDecision {
+  private getEarlyRetrySignalForNextCandle(formingCandle: Candle, check: EarlyEntryCheck): StrategyDecision {
     if (!this.config.useLossRetryLogic) {
       return {
         signal: null,
@@ -137,7 +148,7 @@ export class TradingViewReversalStrategy {
       };
     }
 
-    const qualifiedTrend = this.getQualifiedFormingTrendColor(formingCandle);
+    const qualifiedTrend = this.getQualifiedFormingTrendColor(formingCandle, check);
     if (!qualifiedTrend.trendColor) {
       return {
         signal: null,
@@ -172,13 +183,13 @@ export class TradingViewReversalStrategy {
       signal: {
         direction,
         kind: "RETRY",
-        reason: `early retry setup; forming candle continued ${this.retryTrendColor} trend (${qualifiedTrend.movePct.toFixed(4)}%)`,
+        reason: `${check.label} retry setup; forming candle continued ${this.retryTrendColor} trend (${qualifiedTrend.movePct.toFixed(4)}%)`,
       },
       reason: "early retry signal",
     };
   }
 
-  private getEarlyBaseSignalForNextCandle(formingCandle: Candle): StrategyDecision {
+  private getEarlyBaseSignalForNextCandle(formingCandle: Candle, check: EarlyEntryCheck): StrategyDecision {
     const baseBlockReason = this.getBaseBlockReason();
     if (baseBlockReason) {
       return {
@@ -187,7 +198,7 @@ export class TradingViewReversalStrategy {
       };
     }
 
-    const qualifiedTrend = this.getQualifiedFormingTrendColor(formingCandle);
+    const qualifiedTrend = this.getQualifiedFormingTrendColor(formingCandle, check);
     if (!qualifiedTrend.trendColor) {
       return {
         signal: null,
@@ -212,7 +223,7 @@ export class TradingViewReversalStrategy {
         signal: {
           direction: "DOWN",
           kind: "BASE",
-          reason: `early base setup; forming candle is third green trend candle (${qualifiedTrend.movePct.toFixed(4)}%)`,
+          reason: `${check.label} base setup; forming candle is third green trend candle (${qualifiedTrend.movePct.toFixed(4)}%)`,
         },
         reason: "early base signal",
       };
@@ -223,7 +234,7 @@ export class TradingViewReversalStrategy {
         signal: {
           direction: "UP",
           kind: "BASE",
-          reason: `early base setup; forming candle is third red trend candle (${qualifiedTrend.movePct.toFixed(4)}%)`,
+          reason: `${check.label} base setup; forming candle is third red trend candle (${qualifiedTrend.movePct.toFixed(4)}%)`,
         },
         reason: "early base signal",
       };
@@ -235,7 +246,7 @@ export class TradingViewReversalStrategy {
     };
   }
 
-  private getQualifiedFormingTrendColor(formingCandle: Candle): {
+  private getQualifiedFormingTrendColor(formingCandle: Candle, check: EarlyEntryCheck): {
     trendColor: Exclude<TrendColor, "doji"> | null;
     movePct: number;
     reason: string;
@@ -251,8 +262,9 @@ export class TradingViewReversalStrategy {
 
     const movePct = ((formingCandle.close - previousClosedCandle.close) / previousClosedCandle.close) * 100;
     const rawCurrentColor = rawColor(formingCandle);
+    const minMovePct = check.minMovePct;
 
-    if (rawCurrentColor === "green" && movePct >= this.config.earlyEntryMinMovePct) {
+    if (rawCurrentColor === "green" && (minMovePct === null || movePct >= minMovePct)) {
       return {
         trendColor: "green",
         movePct,
@@ -260,7 +272,7 @@ export class TradingViewReversalStrategy {
       };
     }
 
-    if (rawCurrentColor === "red" && movePct <= -this.config.earlyEntryMinMovePct) {
+    if (rawCurrentColor === "red" && (minMovePct === null || movePct <= -minMovePct)) {
       return {
         trendColor: "red",
         movePct,
@@ -271,7 +283,10 @@ export class TradingViewReversalStrategy {
     return {
       trendColor: null,
       movePct,
-      reason: `early-entry move ${movePct.toFixed(4)}% has not reached +/-${this.config.earlyEntryMinMovePct}%`,
+      reason:
+        minMovePct === null
+          ? `${check.label} requires a red or green forming candle`
+          : `${check.label} move ${movePct.toFixed(4)}% has not reached +/-${minMovePct}%`,
     };
   }
 

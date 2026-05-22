@@ -1,6 +1,6 @@
 import axios from "axios";
-import { AppConfig } from "./config";
-import { Direction, PolymarketMarketSelection, PolymarketOutcome } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { Direction, PolymarketMarketSelection, PolymarketOutcome } from "../domain/types";
 
 type GammaMarket = {
   question?: string;

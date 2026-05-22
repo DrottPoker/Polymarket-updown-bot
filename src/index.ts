@@ -1,5 +1,5 @@
-import { fetchCandles } from "./candles";
-import { loadConfig } from "./config";
+import { loadConfig } from "./config/appConfig";
+import { Candle, LiveOrder, PaperTrade, ResolvedPaperTrade } from "./domain/types";
 import {
   appendTradeResult,
   ensureCsvLog,
@@ -13,12 +13,14 @@ import {
   logStartup,
   logWarmup,
   refreshStatsLog,
-} from "./logger";
-import { createPaperTrade, resolvePaperTrade } from "./paperBroker";
-import { PolymarketLiveExecutor } from "./liveExecutor";
-import { RuntimeRiskManager } from "./riskManager";
-import { TradingViewReversalStrategy } from "./strategy";
-import { Candle, LiveOrder, PaperTrade } from "./types";
+} from "./logging/logger";
+import { GoogleSheetsLogger } from "./logging/googleSheetsLogger";
+import { fetchCandles } from "./marketData/candles";
+import { closePolymarketChainlinkCandleSources } from "./marketData/polymarketChainlinkCandles";
+import { PolymarketLiveExecutor } from "./polymarket/liveExecutor";
+import { createPaperTrade, resolvePaperTrade } from "./trading/paperBroker";
+import { RuntimeRiskManager } from "./trading/riskManager";
+import { TradingViewReversalStrategy } from "./trading/strategy";
 
 const config = loadConfig();
 const runOnce = process.env.RUN_ONCE === "1" || process.env.RUN_ONCE?.toLowerCase() === "true";
@@ -30,14 +32,26 @@ const strategy = new TradingViewReversalStrategy(config);
 const riskManager = new RuntimeRiskManager(config);
 const polymarketExecutor = config.executionMode !== "paper" ? new PolymarketLiveExecutor(config) : null;
 const liveExecutor = config.executionMode === "live" ? polymarketExecutor : null;
+const googleSheetsLogger = config.googleSheetsEnabled ? new GoogleSheetsLogger(config) : null;
 
 let initialized = false;
 let lastProcessedClosedCandleOpenTime = 0;
 let lastHandledCandleOpenTime = 0;
-let lastEarlyEntryTargetOpenTime = 0;
+let earlyEntryAttemptTargetOpenTime = 0;
+let earlyEntryAttemptedStages = new Set<string>();
+let pendingEarlyEntryTargetOpenTime: number | null = null;
+let pendingEarlyEntryFinalValidationDone = false;
 let pendingTrade: PaperTrade | null = null;
+let pendingStrategyOnlyTrade: PaperTrade | null = null;
 let pendingLiveOrder: LiveOrder | null = null;
 let shuttingDown = false;
+
+type EarlyEntryStage = {
+  name: string;
+  label: string;
+  secondsBeforeClose: number;
+  minMovePct: number | null;
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,6 +63,93 @@ function secondsIntoCandle(candle: Candle, now: number): number {
 
 function secondsUntilCandleClose(candle: Candle, now: number): number {
   return Math.max(0, Math.ceil((candle.closeTime - now) / 1000));
+}
+
+function getEarlyEntryStages(): EarlyEntryStage[] {
+  return [
+    {
+      name: "primary",
+      label: "primary early entry",
+      secondsBeforeClose: config.earlyEntryPrimarySecondsBeforeClose,
+      minMovePct: config.earlyEntryPrimaryMinMovePct,
+    },
+    {
+      name: "secondary",
+      label: "secondary early entry",
+      secondsBeforeClose: config.earlyEntrySecondarySecondsBeforeClose,
+      minMovePct: config.earlyEntrySecondaryMinMovePct,
+    },
+    {
+      name: "final",
+      label: "final early entry",
+      secondsBeforeClose: config.earlyEntryOrderSecondsBeforeClose,
+      minMovePct: null,
+    },
+  ];
+}
+
+function resetEarlyEntryAttemptsForTarget(targetOpenTime: number): void {
+  if (earlyEntryAttemptTargetOpenTime === targetOpenTime) {
+    return;
+  }
+
+  earlyEntryAttemptTargetOpenTime = targetOpenTime;
+  earlyEntryAttemptedStages = new Set<string>();
+}
+
+function markEarlyEntryTargetDone(targetOpenTime: number): void {
+  resetEarlyEntryAttemptsForTarget(targetOpenTime);
+  for (const stage of getEarlyEntryStages()) {
+    earlyEntryAttemptedStages.add(stage.name);
+  }
+}
+
+function trackPendingEarlyEntry(targetOpenTime: number, finalValidationDone: boolean): void {
+  pendingEarlyEntryTargetOpenTime = targetOpenTime;
+  pendingEarlyEntryFinalValidationDone = finalValidationDone;
+}
+
+function clearPendingEarlyEntryTracking(): void {
+  pendingEarlyEntryTargetOpenTime = null;
+  pendingEarlyEntryFinalValidationDone = false;
+}
+
+function clockTimeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function localClockMinutes(timestampMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestampMs));
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0");
+
+  return hour * 60 + minute;
+}
+
+function isNoTradeWindowActive(targetCandleOpenTime: number): boolean {
+  if (!config.noTradeWindowEnabled) {
+    return false;
+  }
+
+  const start = clockTimeToMinutes(config.noTradeStart);
+  const end = clockTimeToMinutes(config.noTradeEnd);
+  const target = localClockMinutes(targetCandleOpenTime, config.noTradeTimeZone);
+
+  if (start < end) {
+    return target >= start && target < end;
+  }
+
+  return target >= start || target < end;
+}
+
+function noTradeWindowLabel(): string {
+  return `${config.noTradeStart}-${config.noTradeEnd} ${config.noTradeTimeZone}`;
 }
 
 function getNextCandlePlaceholder(currentCandle: Candle): Candle {
@@ -80,8 +181,15 @@ function warmUpStrategy(closedCandles: Candle[]): void {
 
 function skipStartupCandle(currentCandle: Candle): void {
   lastHandledCandleOpenTime = currentCandle.openTime;
-  lastEarlyEntryTargetOpenTime = getNextCandlePlaceholder(currentCandle).openTime;
+  markEarlyEntryTargetDone(getNextCandlePlaceholder(currentCandle).openTime);
   logSkip(`${new Date(currentCandle.openTime).toISOString()} startup candle is already in progress; waiting for next signal`);
+}
+
+function trackStrategyOnlyTrade(trade: PaperTrade): void {
+  pendingStrategyOnlyTrade = trade;
+  logSkip(
+    `${new Date(trade.candleOpenTime).toISOString()} ${trade.kind} ${trade.direction} signal skipped by no-trade window (${noTradeWindowLabel()}); strategy state will update without placing an order`
+  );
 }
 
 async function cancelPendingLiveOrder(): Promise<void> {
@@ -128,6 +236,47 @@ async function cancelPendingLiveOrderIfDue(now: number): Promise<void> {
   }
 }
 
+async function cancelInvalidatedPendingEarlyEntry(currentCandle: Candle, reason: string): Promise<void> {
+  if (!pendingTrade) {
+    clearPendingEarlyEntryTracking();
+    return;
+  }
+
+  logSkip(
+    `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed (${reason}); canceling pending ${pendingTrade.kind} ${pendingTrade.direction} order`
+  );
+
+  if (!liveExecutor || !pendingLiveOrder) {
+    pendingTrade = null;
+    clearPendingEarlyEntryTracking();
+    return;
+  }
+
+  await refreshPendingLiveOrderFillStatus();
+  if (pendingLiveOrder.filled) {
+    logSkip(
+      `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed, but live order is already filled; trade will be managed to candle close`
+    );
+    pendingEarlyEntryFinalValidationDone = true;
+    return;
+  }
+
+  await cancelPendingLiveOrder();
+  if (pendingLiveOrder?.filled) {
+    logSkip(
+      `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed, but live order filled before cancel completed; trade will be managed to candle close`
+    );
+    pendingEarlyEntryFinalValidationDone = true;
+    return;
+  }
+
+  if (pendingLiveOrder?.canceled) {
+    pendingTrade = null;
+    pendingLiveOrder = null;
+    clearPendingEarlyEntryTracking();
+  }
+}
+
 async function openTrade(trade: PaperTrade, sourceCandleOpenTime: number): Promise<boolean> {
   logSignal(trade, config.tradeWindowSeconds);
 
@@ -164,8 +313,34 @@ async function openTrade(trade: PaperTrade, sourceCandleOpenTime: number): Promi
   return true;
 }
 
+async function initializeGoogleSheets(): Promise<void> {
+  if (!googleSheetsLogger) {
+    return;
+  }
+
+  try {
+    await googleSheetsLogger.ensureSheets();
+    await googleSheetsLogger.refreshStats();
+  } catch (error) {
+    logError(error);
+  }
+}
+
+async function syncGoogleSheetsTrade(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): Promise<void> {
+  if (!googleSheetsLogger) {
+    return;
+  }
+
+  try {
+    await googleSheetsLogger.appendTradeResult(trade, liveOrder);
+    await googleSheetsLogger.refreshStats();
+  } catch (error) {
+    logError(error);
+  }
+}
+
 async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<void> {
-  if (!config.earlyEntryEnabled || pendingTrade) {
+  if (!config.earlyEntryEnabled || pendingTrade || pendingStrategyOnlyTrade) {
     return;
   }
 
@@ -174,30 +349,93 @@ async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<
   }
 
   const nextCandle = getNextCandlePlaceholder(currentCandle);
-  if (lastEarlyEntryTargetOpenTime === nextCandle.openTime) {
-    return;
-  }
+  resetEarlyEntryAttemptsForTarget(nextCandle.openTime);
 
   const secondsLeft = secondsUntilCandleClose(currentCandle, now);
-  if (secondsLeft > config.earlyEntrySecondsBeforeClose) {
+  const stage = getEarlyEntryStages().find(
+    (earlyEntryStage) =>
+      secondsLeft <= earlyEntryStage.secondsBeforeClose && !earlyEntryAttemptedStages.has(earlyEntryStage.name)
+  );
+  if (!stage) {
     return;
   }
 
-  const decision = strategy.getEarlySignalForNextCandle(currentCandle);
+  earlyEntryAttemptedStages.add(stage.name);
+
+  const decision = strategy.getEarlySignalForNextCandle(currentCandle, {
+    label: stage.label,
+    minMovePct: stage.minMovePct,
+  });
   if (!decision.signal) {
     return;
   }
 
   const trade = createPaperTrade(config, decision.signal, nextCandle, now);
-  await openTrade(trade, currentCandle.openTime);
-  lastEarlyEntryTargetOpenTime = nextCandle.openTime;
+  if (isNoTradeWindowActive(nextCandle.openTime)) {
+    trackStrategyOnlyTrade(trade);
+    markEarlyEntryTargetDone(nextCandle.openTime);
+    return;
+  }
+
+  const opened = await openTrade(trade, currentCandle.openTime);
+  if (opened) {
+    markEarlyEntryTargetDone(nextCandle.openTime);
+    trackPendingEarlyEntry(nextCandle.openTime, stage.name === "final");
+  }
+}
+
+async function maybeValidatePendingEarlyEntry(currentCandle: Candle, now: number): Promise<void> {
+  if (!pendingTrade || !pendingEarlyEntryTargetOpenTime || pendingEarlyEntryFinalValidationDone) {
+    return;
+  }
+
+  if (now > currentCandle.closeTime) {
+    return;
+  }
+
+  const nextCandle = getNextCandlePlaceholder(currentCandle);
+  if (pendingEarlyEntryTargetOpenTime !== nextCandle.openTime || pendingTrade.candleOpenTime !== nextCandle.openTime) {
+    return;
+  }
+
+  const secondsLeft = secondsUntilCandleClose(currentCandle, now);
+  if (secondsLeft > config.earlyEntryOrderSecondsBeforeClose) {
+    return;
+  }
+
+  const decision = strategy.getEarlySignalForNextCandle(currentCandle, {
+    label: "final early-entry validation",
+    minMovePct: null,
+  });
+
+  if (!decision.signal) {
+    await cancelInvalidatedPendingEarlyEntry(currentCandle, decision.reason);
+    return;
+  }
+
+  if (decision.signal.direction !== pendingTrade.direction || decision.signal.kind !== pendingTrade.kind) {
+    await cancelInvalidatedPendingEarlyEntry(
+      currentCandle,
+      `expected ${pendingTrade.kind} ${pendingTrade.direction}, got ${decision.signal.kind} ${decision.signal.direction}`
+    );
+    return;
+  }
+
+  pendingEarlyEntryFinalValidationDone = true;
 }
 
 async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
   const newClosedCandles = closedCandles.filter((candle) => candle.openTime > lastProcessedClosedCandleOpenTime);
 
   for (const candle of newClosedCandles) {
-    if (pendingTrade && pendingTrade.candleOpenTime === candle.openTime) {
+    if (pendingStrategyOnlyTrade && pendingStrategyOnlyTrade.candleOpenTime === candle.openTime) {
+      const strategyOnlyTrade = resolvePaperTrade(pendingStrategyOnlyTrade, candle);
+      logSkip(
+        `${new Date(candle.openTime).toISOString()} no-trade window strategy-only signal resolved as hypothetical ${strategyOnlyTrade.result}`
+      );
+      strategy.recordTradeResult(strategyOnlyTrade, candle);
+      pendingStrategyOnlyTrade = null;
+    } else if (pendingTrade && pendingTrade.candleOpenTime === candle.openTime) {
       await refreshPendingLiveOrderFillStatus();
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
         await cancelPendingLiveOrder();
@@ -210,6 +448,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         strategy.recordTradeResult(strategyOnlyTrade, candle);
         pendingTrade = null;
         pendingLiveOrder = null;
+        clearPendingEarlyEntryTracking();
         lastProcessedClosedCandleOpenTime = candle.openTime;
         continue;
       }
@@ -218,10 +457,12 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       logResult(resolvedTrade);
       appendTradeResult(config.logFile, resolvedTrade, pendingLiveOrder);
       refreshStatsLog(config.logFile, config.statsFile);
+      await syncGoogleSheetsTrade(resolvedTrade, pendingLiveOrder);
       strategy.recordTradeResult(resolvedTrade, candle);
       riskManager.recordResolvedTrade(resolvedTrade);
       pendingTrade = null;
       pendingLiveOrder = null;
+      clearPendingEarlyEntryTracking();
     } else {
       strategy.processClosedCandleWithoutTrade(candle);
     }
@@ -249,6 +490,7 @@ async function tick(): Promise<void> {
   }
 
   await cancelPendingLiveOrderIfDue(now);
+  await maybeValidatePendingEarlyEntry(currentCandle, now);
   await maybeOpenEarlyEntry(currentCandle, now);
 
   if (currentCandle.openTime === lastHandledCandleOpenTime) {
@@ -264,7 +506,7 @@ async function tick(): Promise<void> {
     return;
   }
 
-  if (pendingTrade) {
+  if (pendingTrade || pendingStrategyOnlyTrade) {
     logSkip(`${new Date(currentCandle.openTime).toISOString()} pending trade still open`);
     lastHandledCandleOpenTime = currentCandle.openTime;
     return;
@@ -278,6 +520,12 @@ async function tick(): Promise<void> {
   }
 
   const trade = createPaperTrade(config, decision.signal, currentCandle, now);
+  if (isNoTradeWindowActive(currentCandle.openTime)) {
+    trackStrategyOnlyTrade(trade);
+    lastHandledCandleOpenTime = currentCandle.openTime;
+    return;
+  }
+
   await openTrade(trade, currentCandle.openTime);
 
   lastHandledCandleOpenTime = currentCandle.openTime;
@@ -287,6 +535,7 @@ async function main(): Promise<void> {
   ensureCsvLog(config.logFile);
   refreshStatsLog(config.logFile, config.statsFile);
   logStartup(config);
+  await initializeGoogleSheets();
 
   while (!shuttingDown) {
     try {
@@ -295,11 +544,13 @@ async function main(): Promise<void> {
       logError(error);
       if (runOnce) {
         process.exitCode = 1;
+        closePolymarketChainlinkCandleSources();
         return;
       }
     }
 
     if (runOnce) {
+      closePolymarketChainlinkCandleSources();
       return;
     }
 
@@ -307,6 +558,7 @@ async function main(): Promise<void> {
   }
 
   await cancelPendingLiveOrder();
+  closePolymarketChainlinkCandleSources();
 }
 
 function requestShutdown(signal: string): void {

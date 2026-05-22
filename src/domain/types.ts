@@ -10,6 +10,8 @@ export type TradeKind = "BASE" | "RETRY";
 
 export type ExecutionMode = "paper" | "live_dry_run" | "live";
 
+export type PriceSource = "binance" | "polymarket_chainlink";
+
 export type Candle = {
   openTime: number;
   closeTime: number;

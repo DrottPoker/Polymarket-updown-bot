@@ -1,15 +1,16 @@
-# Polymarket Up/Down Paper Bot
+# Polymarket Up/Down Bot
 
-Node.js/TypeScript paper-trading bot for an ETH/USDT configurable-interval 3-candle reversal strategy intended for Polymarket Up/Down markets.
+Node.js/TypeScript trading bot for an ETH/USDT configurable-interval 3-candle reversal strategy intended for Polymarket Up/Down markets.
 
-By default this runs in paper mode. It fetches Binance ETH/USDT candles, detects TradingView-style base/retry signals, simulates entry at the configured cents price, resolves after the candle closes, and writes results to CSV.
+By default this runs in paper mode. It fetches Polymarket/Chainlink reference candles for current crypto Up/Down markets, detects TradingView-style base/retry signals, simulates entry at the configured cents price, resolves after the candle closes, and writes results to CSV.
 
-Live Polymarket execution is available behind explicit env guards. Do not enable it until paper behavior, funding, allowances, and risk limits are verified.
+Live Polymarket execution is available behind explicit config guards. Do not enable it until paper behavior, funding, allowances, and risk limits are verified.
 
 ## Setup
 
 ```bash
 npm install
+cp bot.config.example.json bot.config.json
 cp .env.example .env
 npm run dev
 ```
@@ -28,76 +29,121 @@ npm run dry-run:once
 
 ## Config
 
-See `.env.example` for defaults:
+General bot options live in `bot.config.json`. Copy `bot.config.example.json` once, then edit the local file. It is ignored by Git so VPS-specific settings do not conflict with future pulls.
+
+Secrets and account-specific values live in `.env`:
 
 ```env
-SYMBOL=ETHUSDT
-INTERVAL=15m
-ENTRY_CENTS=51
-TRADE_WINDOW_SECONDS=1000
-STAKE_USD=5
-EV_STAKE_USD=100
-POLL_MS=1000
-CANDLE_LIMIT=300
-LOG_FILE=trades.csv
-STATS_FILE=stats.csv
-BINANCE_BASE_URL=https://api.binance.com
-IGNORE_DOJI_IN_TREND=false
-USE_LOSS_RETRY_LOGIC=true
-RETRY_WAIT_CANDLES=0
-EARLY_ENTRY_ENABLED=false
-EARLY_ENTRY_SECONDS_BEFORE_CLOSE=15
-EARLY_ENTRY_MIN_MOVE_PCT=0.05
-
-EXECUTION_MODE=paper
-LIVE_TRADING_ENABLED=false
-LIVE_CONFIRMATION=
-
-GAMMA_BASE_URL=https://gamma-api.polymarket.com
-CLOB_HOST=https://clob.polymarket.com
 POLYGON_RPC_URL=https://polygon-rpc.com
-POLYMARKET_ASSET_SLUG=eth
-POLYMARKET_INTERVAL_SLUG=15m
-POLYMARKET_CHAIN_ID=137
-POLYMARKET_SIGNATURE_TYPE=3
 POLYMARKET_FUNDER_ADDRESS=
 POLYMARKET_PRIVATE_KEY=
 CLOB_API_KEY=
 CLOB_SECRET=
 CLOB_PASS_PHRASE=
-
-MAX_ENTRY_CENTS=51
-MAX_STAKE_USD=5
-MAX_DAILY_LOSS_USD=25
-MAX_TRADES_PER_DAY=20
-MAX_LIVE_TRADE_WINDOW_SECONDS=60
+GOOGLE_SERVICE_ACCOUNT_EMAIL=
+GOOGLE_PRIVATE_KEY=
 ```
+
+Runtime scripts can temporarily override the configured execution mode. Do not put non-secret bot settings in `.env`.
+
+## Project Structure
+
+```text
+src/
+  config/       Config loading and validation
+  domain/       Shared domain types
+  logging/      Console, trade CSV, and stats CSV output
+  marketData/   Binance and Polymarket/Chainlink candle sources
+  polymarket/   Gamma market discovery and CLOB live execution
+  trading/      Strategy, simulated trades, and runtime risk checks
+  index.ts      Main polling loop and trade lifecycle
+```
+
+## Documentation
+
+- [Overview](docs/OVERVIEW.md)
+- [Features](docs/FEATURES.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Operations](docs/OPERATIONS.md)
+
+## Price Source
+
+`priceSource: "polymarket_chainlink"` makes the bot use the same reference family as current Polymarket crypto Up/Down markets:
+
+- Historical warmup candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice` as close.
+- Live/current candles are aggregated from Polymarket RTDS `crypto_prices_chainlink` WebSocket updates.
+
+Use `priceSource: "binance"` only for comparison/backtesting against Binance candles. Binance can disagree with Polymarket settlement for current Chainlink-resolved markets.
+
+When using `polymarket_chainlink`, `polymarketAssetSlug` selects the Chainlink symbol (`eth` -> `eth/usd`). `symbol` remains as the CSV label and Binance fallback symbol.
 
 ## Strategy
 
 - Base signal: last 3 trend candles red means bet `UP`; last 3 trend candles green means bet `DOWN`.
-- Doji trend handling follows `IGNORE_DOJI_IN_TREND`. When false, doji candles inherit the previous non-doji trend color.
+- Doji trend handling follows `ignoreDojiInTrend`. When false, doji candles inherit the previous non-doji trend color.
 - Active trade doji results count as `LOSS`, matching the TradingView script.
-- When `USE_LOSS_RETRY_LOGIC=true`, a loss can arm retry mode after `RETRY_WAIT_CANDLES`.
+- When `useLossRetryLogic=true`, a loss can arm retry mode after `retryWaitCandles`.
 - When retry logic is off, a loss blocks same-trend continuation until the trend breaks and 3 fresh candles have formed.
-- The bot warms up strategy state from `CANDLE_LIMIT` Binance candles at startup.
+- The bot warms up strategy state from `candleLimit` candles at startup.
 - Optional early entry can place the next contract order before candle close when the forming candle is already the third trend candle.
 
 ## Spreadsheet Logs
 
-The bot writes every resolved trade to `LOG_FILE` as a spreadsheet-friendly CSV. New live trades include Polymarket metadata such as market slug, token id, order id, live status, fill status, live price, and live size.
+The bot writes every resolved trade to `logFile` as a spreadsheet-friendly CSV. New live trades include Polymarket metadata such as market slug, token id, order id, live status, fill status, live price, and live size.
 
-After each resolved trade, the bot rewrites `STATS_FILE` with aggregate statistics for `TOTAL`, `BASE`, `RETRY`, `UP`, `DOWN`, `BASE_UP`, `BASE_DOWN`, `RETRY_UP`, and `RETRY_DOWN`.
+After each resolved trade, the bot rewrites `statsFile` with aggregate statistics for `TOTAL`, `BASE`, `RETRY`, `UP`, `DOWN`, `BASE_UP`, `BASE_DOWN`, `RETRY_UP`, and `RETRY_DOWN`.
 
 Both files can be opened directly in Excel or imported into Google Sheets.
 
+## Google Sheets Logging
+
+The bot can also write resolved trades and aggregate stats to an existing Google spreadsheet.
+
+Enable it in `bot.config.json`:
+
+```json
+{
+  "googleSheetsEnabled": true,
+  "googleSheetsSpreadsheetId": "your-spreadsheet-id",
+  "googleSheetsTradesSheetName": "Trades",
+  "googleSheetsStatsSheetName": "Stats"
+}
+```
+
+Use a Google service account and share the spreadsheet with the service account email as an editor. Store the service account credentials in `.env`:
+
+```env
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+Google Sheets stats are calculated from rows that exist in the configured `Trades` tab. Local CSV trades are not imported or counted in the Google Sheets dashboard. Google Sheets errors are logged, but they do not stop the bot from managing trades.
+
+To clear the Google Sheets trade log and restart the dashboard from zero:
+
+```bash
+npm run sheets:clear
+```
+
 ## Early Entry
 
-When `EARLY_ENTRY_ENABLED=true`, the bot checks the forming candle during the final `EARLY_ENTRY_SECONDS_BEFORE_CLOSE` seconds.
+When `earlyEntryEnabled=true`, the bot checks the forming candle in three stages before the next contract opens.
 
-For BASE setups, if the forming candle is at least `EARLY_ENTRY_MIN_MOVE_PCT` above the previous closed candle and is the third green trend candle, it places `DOWN` on the next contract. If it is at least that much below and is the third red trend candle, it places `UP` on the next contract.
+- Primary: at `earlyEntryPrimarySecondsBeforeClose`, require at least `earlyEntryPrimaryMinMovePct`.
+- Secondary: at `earlyEntrySecondarySecondsBeforeClose`, require at least `earlyEntrySecondaryMinMovePct`.
+- Final: at `earlyEntryOrderSecondsBeforeClose`, require only the correct red/green forming candle for the setup.
 
-For RETRY setups, if the bot is waiting for retry confirmation and the forming candle continues the retry trend by at least `EARLY_ENTRY_MIN_MOVE_PCT`, it places the retry order on the next contract as soon as that forming candle would make retry ready.
+For BASE setups, a third green trend candle places `DOWN` on the next contract; a third red trend candle places `UP`. For RETRY setups, the same staged checks apply when the forming candle continues the retry trend and would make retry ready.
+
+If a primary or secondary early-entry order is already pending, the final check still runs at `earlyEntryOrderSecondsBeforeClose`. If the forming candle no longer produces the same setup and direction, the bot cancels the pending order when it is not already filled.
+
+## No-Trade Window
+
+Set `noTradeWindowEnabled=true` to block new entries during a configured local-time window. The default window is `23:00` to `07:00` in `Europe/Stockholm`.
+
+The window is checked against the target contract candle open time. This means early entry will not place a 23:00 contract at 22:59 if the no-trade window starts at 23:00.
+
+Blocked signals are tracked only for strategy state, not as live orders and not as CSV trades. Open orders and pending trade results are still handled normally.
 
 ## Live Execution
 
@@ -107,42 +153,46 @@ Live dry-run and live mode both use:
 - Gamma market metadata to map `UP` to the `Up` CLOB token and `DOWN` to the `Down` CLOB token.
 - CLOB orderbook metadata for `tick_size`, `min_order_size`, and `neg_risk`.
 
-`EXECUTION_MODE=live_dry_run` then logs `[LIVE_DRY_RUN]` with the exact BUY order it would place. It does not create a signer, does not derive CLOB credentials, and does not post or cancel orders.
+`executionMode: "live_dry_run"` then logs `[LIVE_DRY_RUN]` with the exact BUY order it would place. It does not create a signer, does not derive CLOB credentials, and does not post or cancel orders.
 
 Real live mode additionally uses:
 
-- `@polymarket/clob-client-v2` to submit a GTC limit BUY at `ENTRY_CENTS`.
-- Automatic cancel at `candleOpenTime + TRADE_WINDOW_SECONDS`.
-- Fill checking through authenticated CLOB trades; an unfilled canceled order does not update retry/result state.
+- `@polymarket/clob-client-v2` to submit a GTC limit BUY at `entryCents`.
+- Automatic cancel at `candleOpenTime + tradeWindowSeconds`.
+- Fill checking through authenticated CLOB order/trade data; an unfilled canceled order updates strategy state hypothetically but does not create a CSV trade row.
 
-To dry-run against Polymarket without placing orders:
+To dry-run against Polymarket without placing orders, use `npm run dry-run`. For manual config, set this in `bot.config.json`:
 
-```env
-EXECUTION_MODE=live_dry_run
-LIVE_TRADING_ENABLED=false
-POLYMARKET_PRIVATE_KEY=
-CLOB_API_KEY=
-CLOB_SECRET=
-CLOB_PASS_PHRASE=
+```json
+{
+  "executionMode": "live_dry_run",
+  "liveTradingEnabled": false
+}
 ```
 
-To enable live mode, set all of these intentionally:
+To enable live mode, keep secrets in `.env`:
 
 ```env
-EXECUTION_MODE=live
-LIVE_TRADING_ENABLED=true
-LIVE_CONFIRMATION=PLACE_REAL_POLYMARKET_ORDERS
 POLYMARKET_PRIVATE_KEY=0x...
 POLYMARKET_FUNDER_ADDRESS=0x...
-POLYMARKET_SIGNATURE_TYPE=3
 POLYGON_RPC_URL=https://polygon-rpc.com
-TRADE_WINDOW_SECONDS=60
-MAX_LIVE_TRADE_WINDOW_SECONDS=60
+```
+
+Then set live guards and risk limits in `bot.config.json`:
+
+```json
+{
+  "liveTradingEnabled": true,
+  "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS",
+  "polymarketSignatureType": 3,
+  "tradeWindowSeconds": 60,
+  "maxLiveTradeWindowSeconds": 60
+}
 ```
 
 For new Polymarket API users, signature type `3` is the deposit wallet flow. The funder address should be the deposit wallet address. You can optionally set `CLOB_API_KEY`, `CLOB_SECRET`, and `CLOB_PASS_PHRASE`; otherwise the bot derives API credentials at startup with the private key.
 
-Keep `EXECUTION_MODE=paper` while testing. `npm run live` forces `EXECUTION_MODE=live` for that process, but it still requires the live env guards above. `RUN_ONCE` is blocked in live mode so the bot cannot place an order and exit before the cancel/fill loop runs.
+Keep `executionMode: "paper"` while testing. `npm run live` forces live mode for that process, but it still requires the live guards above. `RUN_ONCE` is blocked in live mode so the bot cannot place an order and exit before the cancel/fill loop runs.
 
 ## Scripts
 

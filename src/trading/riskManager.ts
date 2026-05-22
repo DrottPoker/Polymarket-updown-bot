@@ -1,5 +1,5 @@
-import { AppConfig } from "./config";
-import { PaperTrade, ResolvedPaperTrade } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { PaperTrade, ResolvedPaperTrade } from "../domain/types";
 
 function dayKey(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);

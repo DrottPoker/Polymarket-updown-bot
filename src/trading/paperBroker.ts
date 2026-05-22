@@ -1,5 +1,5 @@
-import { AppConfig } from "./config";
-import { Candle, PaperTrade, ResolvedPaperTrade, StrategySignal } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { Candle, PaperTrade, ResolvedPaperTrade, StrategySignal } from "../domain/types";
 
 export function createPaperTrade(
   config: AppConfig,

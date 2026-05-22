@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "dev:once": "node -r ts-node/register -e \"process.env.RUN_ONCE='1'; require('./src/index.ts')\"",
-    "dry-run": "node -r ts-node/register -e \"process.env.EXECUTION_MODE='live_dry_run'; require('./src/index.ts')\"",
-    "dry-run:once": "node -r ts-node/register -e \"process.env.EXECUTION_MODE='live_dry_run'; process.env.RUN_ONCE='1'; require('./src/index.ts')\"",
-    "live": "node -r ts-node/register -e \"process.env.EXECUTION_MODE='live'; require('./src/index.ts')\"",
-    "build": "tsc -p tsconfig.json",
+    "dry-run": "node -r ts-node/register -e \"process.env.BOT_EXECUTION_MODE='live_dry_run'; require('./src/index.ts')\"",
+    "dry-run:once": "node -r ts-node/register -e \"process.env.BOT_EXECUTION_MODE='live_dry_run'; process.env.RUN_ONCE='1'; require('./src/index.ts')\"",
+    "live": "node -r ts-node/register -e \"process.env.BOT_EXECUTION_MODE='live'; require('./src/index.ts')\"",
+    "sheets:clear": "node -r ts-node/register src/scripts/clearGoogleSheets.ts",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

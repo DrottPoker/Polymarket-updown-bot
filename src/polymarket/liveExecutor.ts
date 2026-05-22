@@ -10,9 +10,9 @@ import {
 } from "@polymarket/clob-client-v2";
 import { createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { AppConfig } from "./config";
-import { findPolymarketMarketForTrade } from "./polymarketMarket";
-import { LiveOrder, PaperTrade } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { LiveOrder, PaperTrade } from "../domain/types";
+import { findPolymarketMarketForTrade } from "./marketDiscovery";
 
 type OrderDetails = {
   status?: string;

@@ -1,9 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { AppConfig } from "./config";
-import { LiveOrder, PaperTrade, ResolvedPaperTrade } from "./types";
+import { AppConfig } from "../config/appConfig";
+import { LiveOrder, PaperTrade, ResolvedPaperTrade } from "../domain/types";
 
-const tradeCsvColumns = [
+export const tradeCsvColumns = [
   "signal_time",
   "candle_open_time",
   "candle_close_time",
@@ -27,9 +27,24 @@ const tradeCsvColumns = [
   "live_price",
   "live_size",
 ];
-const csvHeader = tradeCsvColumns.join(",");
+export const tradeCsvHeader = tradeCsvColumns.join(",");
 
-type CsvRow = Record<string, string>;
+export const statsCsvColumns = [
+  "updated_at",
+  "scope",
+  "trades",
+  "wins",
+  "losses",
+  "winrate_pct",
+  "total_pnl",
+  "avg_pnl",
+  "total_stake",
+  "avg_stake",
+  "avg_entry_cents",
+];
+export const statsCsvHeader = statsCsvColumns.join(",");
+
+export type CsvRow = Record<string, string>;
 
 type StatsBucket = {
   scope: string;
@@ -190,18 +205,18 @@ export function ensureCsvLog(logFile: string): void {
   mkdirSync(directory, { recursive: true });
 
   if (!existsSync(absolutePath)) {
-    appendFileSync(absolutePath, `${csvHeader}\n`, "utf8");
+    appendFileSync(absolutePath, `${tradeCsvHeader}\n`, "utf8");
     return;
   }
 
   const existing = readFileSync(absolutePath, "utf8");
   const lines = existing.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length === 0 || (lines.length === 1 && lines[0] !== csvHeader)) {
-    writeFileSync(absolutePath, `${csvHeader}\n`, "utf8");
+  if (lines.length === 0 || (lines.length === 1 && lines[0] !== tradeCsvHeader)) {
+    writeFileSync(absolutePath, `${tradeCsvHeader}\n`, "utf8");
     return;
   }
 
-  if (lines[0] !== csvHeader) {
+  if (lines[0] !== tradeCsvHeader) {
     const existingColumns = parseCsvLine(lines[0]);
     const migratedRows = readCsvRows(logFile).map((row) =>
       tradeCsvColumns.map((column) => csvEscape(column === "kind" ? inferTradeKind(row) : row[column] ?? "")).join(",")
@@ -211,13 +226,14 @@ export function ensureCsvLog(logFile: string): void {
       throw new Error(`Cannot migrate ${logFile}; unknown CSV columns: ${unknownColumns.join(", ")}`);
     }
 
-    writeFileSync(absolutePath, `${csvHeader}\n${migratedRows.join("\n")}${migratedRows.length > 0 ? "\n" : ""}`, "utf8");
+    writeFileSync(absolutePath, `${tradeCsvHeader}\n${migratedRows.join("\n")}${migratedRows.length > 0 ? "\n" : ""}`, "utf8");
   }
 }
 
 export function logStartup(config: AppConfig): void {
   console.log("[START]");
   console.log(`execution mode: ${config.executionMode}`);
+  console.log(`price source: ${config.priceSource}`);
   console.log(`symbol: ${config.symbol}`);
   console.log(`interval: ${config.interval}`);
   console.log(`entry: ${config.entryCents}c`);
@@ -229,8 +245,19 @@ export function logStartup(config: AppConfig): void {
   console.log(`retry wait candles: ${config.retryWaitCandles}`);
   console.log(`candle warmup limit: ${config.candleLimit}`);
   console.log(`early entry: ${config.earlyEntryEnabled}`);
-  console.log(`early entry seconds: ${config.earlyEntrySecondsBeforeClose}`);
-  console.log(`early entry min move: ${config.earlyEntryMinMovePct}%`);
+  console.log(
+    `early entry primary: ${config.earlyEntryPrimarySecondsBeforeClose}s / ${config.earlyEntryPrimaryMinMovePct}%`
+  );
+  console.log(
+    `early entry secondary: ${config.earlyEntrySecondarySecondsBeforeClose}s / ${config.earlyEntrySecondaryMinMovePct}%`
+  );
+  console.log(`early entry final: ${config.earlyEntryOrderSecondsBeforeClose}s / color only`);
+  console.log(`no-trade window: ${config.noTradeWindowEnabled}`);
+  console.log(`no-trade hours: ${config.noTradeStart}-${config.noTradeEnd} ${config.noTradeTimeZone}`);
+  if (config.priceSource === "polymarket_chainlink") {
+    console.log(`chainlink symbol: ${config.polymarketAssetSlug}/usd`);
+    console.log(`rtds: ${config.polymarketRtdsUrl}`);
+  }
   if (config.executionMode !== "paper") {
     console.log(`polymarket asset: ${config.polymarketAssetSlug}`);
     console.log(`polymarket interval: ${config.polymarketIntervalSlug}`);
@@ -243,6 +270,11 @@ export function logStartup(config: AppConfig): void {
   console.log(`poll: ${config.pollMs}ms`);
   console.log(`log: ${config.logFile}`);
   console.log(`stats: ${config.statsFile}`);
+  console.log(`google sheets: ${config.googleSheetsEnabled}`);
+  if (config.googleSheetsEnabled) {
+    console.log(`google trades sheet: ${config.googleSheetsTradesSheetName}`);
+    console.log(`google stats sheet: ${config.googleSheetsStatsSheetName}`);
+  }
 }
 
 export function logWarmup(closedCandles: number): void {
@@ -330,8 +362,11 @@ export function logError(error: unknown): void {
   console.error(message);
 }
 
-export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): void {
-  const row = [
+export function buildTradeResultRow(
+  trade: ResolvedPaperTrade,
+  liveOrder?: LiveOrder | null
+): Array<string | number | boolean | null | undefined> {
+  return [
     toIso(trade.signalTime),
     toIso(trade.candleOpenTime),
     toIso(trade.candleCloseTime),
@@ -354,15 +389,15 @@ export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade, li
     liveOrder?.filled,
     liveOrder?.price,
     liveOrder?.size,
-  ]
-    .map(csvEscape)
-    .join(",");
+  ];
+}
 
+export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): void {
+  const row = buildTradeResultRow(trade, liveOrder).map(csvEscape).join(",");
   appendFileSync(resolve(logFile), `${row}\n`, "utf8");
 }
 
-export function refreshStatsLog(tradeLogFile: string, statsFile: string): void {
-  const rows = readCsvRows(tradeLogFile);
+export function buildStatsCsvValuesFromRows(rows: CsvRow[]): Array<Array<string | number>> {
   const buckets = [
     createBucket("TOTAL"),
     createBucket("BASE"),
@@ -395,10 +430,17 @@ export function refreshStatsLog(tradeLogFile: string, statsFile: string): void {
   }
 
   const updatedAt = toIso(Date.now());
-  const statsHeader =
-    "updated_at,scope,trades,wins,losses,winrate_pct,total_pnl,avg_pnl,total_stake,avg_stake,avg_entry_cents";
-  const statsRows = buckets.map((bucket) => bucketToCsvRow(updatedAt, bucket).map(csvEscape).join(","));
+  return [statsCsvColumns, ...buckets.map((bucket) => bucketToCsvRow(updatedAt, bucket))];
+}
+
+export function buildStatsCsvValues(tradeLogFile: string): Array<Array<string | number>> {
+  return buildStatsCsvValuesFromRows(readCsvRows(tradeLogFile));
+}
+
+export function refreshStatsLog(tradeLogFile: string, statsFile: string): void {
+  const values = buildStatsCsvValues(tradeLogFile);
+  const statsRows = values.map((row) => row.map(csvEscape).join(","));
   const absolutePath = resolve(statsFile);
   mkdirSync(dirname(absolutePath), { recursive: true });
-  writeFileSync(absolutePath, `${statsHeader}\n${statsRows.join("\n")}\n`, "utf8");
+  writeFileSync(absolutePath, `${statsRows.join("\n")}\n`, "utf8");
 }
