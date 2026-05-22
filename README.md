@@ -128,6 +128,12 @@ To clear the Google Sheets trade log and restart the dashboard from zero:
 npm run sheets:clear
 ```
 
+To print the built-in guide without clearing anything:
+
+```bash
+npm run sheets:clear:help
+```
+
 ## Early Entry
 
 When `earlyEntryEnabled=true`, the bot checks the forming candle in three stages before the next contract opens.

@@ -375,6 +375,12 @@ Run this to clear the Google Sheets trade log and restart the Google Sheets dash
 npm run sheets:clear
 ```
 
+Run this to show the built-in guide without clearing anything:
+
+```bash
+npm run sheets:clear:help
+```
+
 The clear script only affects the configured Google Sheets `Trades` and `Stats` tabs. It does not modify local CSV files.
 
 Google Sheets failures are logged as errors, but they do not stop trade management. If local CSV logging is enabled, it continues separately.

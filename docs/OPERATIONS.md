@@ -168,6 +168,12 @@ To clear the Google Sheets trade log and reset the Google Sheets dashboard:
 npm run sheets:clear
 ```
 
+To show the built-in script guide without clearing anything:
+
+```bash
+npm run sheets:clear:help
+```
+
 This clears the configured `Trades` tab back to its header row and rebuilds the configured `Stats` tab from that blank trade log. It does not delete or edit local `trades.csv` or `stats.csv`.
 
 ## Dry Run
