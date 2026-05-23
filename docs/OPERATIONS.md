@@ -122,6 +122,8 @@ The no-trade window blocks new entries only. The bot still manages already-open 
 
 Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already fully filled.
 
+On startup, the candle already in progress is skipped for entries. When it closes, the bot logs the resolved open, close, and color before adding it to trend state.
+
 ## Google Sheets Logging
 
 The bot can write trade rows and stats to an existing spreadsheet in Google Drive.

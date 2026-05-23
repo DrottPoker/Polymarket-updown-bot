@@ -160,7 +160,7 @@ When the bot starts, it warms up strategy state from closed candles and skips th
 
 This prevents the bot from entering a trade midway through a candle that started before the process was running.
 
-After that startup candle passes, normal signal processing resumes.
+When that startup candle closes, the bot logs its resolved open, close, and color, then adds it to trend state only. After that, normal signal processing resumes.
 
 ## No-Trade Window
 

@@ -359,18 +359,6 @@ class PolymarketChainlinkCandleSource {
         color: getCandleColor(existing.open, tick.value),
       });
     } else {
-      const previousOpenTime = openTime - this.intervalMs;
-      const previous = this.liveCandles.get(previousOpenTime);
-      if (previous) {
-        this.liveCandles.set(previousOpenTime, {
-          ...previous,
-          high: Math.max(previous.high, tick.value),
-          low: Math.min(previous.low, tick.value),
-          close: tick.value,
-          color: getCandleColor(previous.open, tick.value),
-        });
-      }
-
       this.liveCandles.set(openTime, buildCandle(openTime, this.intervalMs, tick.value, tick.value, tick.value, tick.value));
     }
 
@@ -485,7 +473,7 @@ class PolymarketChainlinkCandleSource {
     const candles: Candle[] = [];
     for (let index = closedLimit; index >= 1; index -= 1) {
       const openTime = currentOpenTime - index * this.intervalMs;
-      const candle = this.liveCandles.get(openTime) ?? this.historicalCandles.get(openTime);
+      const candle = this.historicalCandles.get(openTime) ?? this.liveCandles.get(openTime);
       const resolvedCandle = candle ?? this.buildCandleFromAdjacentOpen(openTime);
       if (!resolvedCandle) {
         throw new Error(
@@ -501,7 +489,7 @@ class PolymarketChainlinkCandleSource {
 
   private buildCandleFromAdjacentOpen(openTime: number): Candle | null {
     const open = this.historicalOpenPrices.get(openTime);
-    const nextCandle = this.liveCandles.get(openTime + this.intervalMs) ?? this.historicalCandles.get(openTime + this.intervalMs);
+    const nextCandle = this.historicalCandles.get(openTime + this.intervalMs) ?? this.liveCandles.get(openTime + this.intervalMs);
     if (open === undefined || !nextCandle) {
       return null;
     }

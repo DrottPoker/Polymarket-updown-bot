@@ -45,6 +45,7 @@ let pendingEarlyEntryFinalValidationDone = false;
 let pendingTrade: PaperTrade | null = null;
 let pendingStrategyOnlyTrade: PaperTrade | null = null;
 let pendingLiveOrder: LiveOrder | null = null;
+let startupSkippedCandleOpenTime: number | null = null;
 let shuttingDown = false;
 
 type EarlyEntryStage = {
@@ -113,6 +114,10 @@ function trackPendingEarlyEntry(targetOpenTime: number, finalValidationDone: boo
 function clearPendingEarlyEntryTracking(): void {
   pendingEarlyEntryTargetOpenTime = null;
   pendingEarlyEntryFinalValidationDone = false;
+}
+
+function formatCandleForLog(candle: Candle): string {
+  return `${candle.color} open=${candle.open.toFixed(2)} close=${candle.close.toFixed(2)}`;
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
@@ -189,9 +194,21 @@ function warmUpStrategy(closedCandles: Candle[]): void {
 }
 
 function skipStartupCandle(currentCandle: Candle): void {
+  startupSkippedCandleOpenTime = currentCandle.openTime;
   lastHandledCandleOpenTime = currentCandle.openTime;
   markEarlyEntryTargetDone(getNextCandlePlaceholder(currentCandle).openTime);
   logSkip(`${new Date(currentCandle.openTime).toISOString()} startup candle is already in progress; waiting for next signal`);
+}
+
+function logStartupSkippedCandleClosed(candle: Candle): void {
+  if (startupSkippedCandleOpenTime !== candle.openTime) {
+    return;
+  }
+
+  logSkip(
+    `${new Date(candle.openTime).toISOString()} startup skipped candle closed as ${formatCandleForLog(candle)}; added to trend state only`
+  );
+  startupSkippedCandleOpenTime = null;
 }
 
 function trackStrategyOnlyTrade(trade: PaperTrade): void {
@@ -505,6 +522,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       strategy.processClosedCandleWithoutTrade(candle);
     }
 
+    logStartupSkippedCandleClosed(candle);
     lastProcessedClosedCandleOpenTime = candle.openTime;
   }
 }
