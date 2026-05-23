@@ -120,6 +120,8 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 During startup, the bot warms up from the latest contiguous closed Polymarket/Chainlink candles it can build. If older Gamma metadata has a gap, the bot starts with the newer contiguous history instead of repeatedly failing on that old candle.
 
+If the bot starts in the middle of a live candle, the candle open is corrected from Gamma `priceToBeat` when available. This avoids treating the first RTDS tick seen after process start as the official Polymarket open.
+
 The no-trade window blocks new entries only. The bot still manages already-open orders, cancels due orders, resolves results, and keeps strategy state current. The time window is checked against the target contract candle open time, so early entry will also be blocked for a contract that opens inside the window.
 
 Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already fully filled.

@@ -207,6 +207,8 @@ This keeps the bot closer to the price source used by Polymarket crypto Up/Down 
 
 Warmup uses the newest contiguous closed candles available from Gamma metadata and RTDS data. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy.
 
+When the process starts in the middle of a candle, the first RTDS tick is not treated as the official candle open. The bot corrects the live candle open from Gamma `priceToBeat` when available, then uses RTDS updates for the live close.
+
 ## Binance Candle Source
 
 Configured with:

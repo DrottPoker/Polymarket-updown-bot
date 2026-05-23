@@ -171,7 +171,9 @@ class PolymarketChainlinkCandleSource {
     await this.waitForFirstPrice();
 
     const currentOpenTime = floorToInterval(Date.now(), this.intervalMs);
+    await this.hydrateHistoricalOpenPrices([currentOpenTime]);
     await this.hydrateHistoricalCandles(currentOpenTime, limit - 1);
+    this.syncLiveCandleOpenFromHistoricalOpen(currentOpenTime);
 
     const closedCandles = this.getContiguousClosedCandles(currentOpenTime, limit - 1);
     const currentCandle = this.getCurrentCandle(currentOpenTime, closedCandles[closedCandles.length - 1]);
@@ -380,9 +382,13 @@ class PolymarketChainlinkCandleSource {
       requiredOpenTimes.push(currentOpenTime - index * this.intervalMs);
     }
 
+    await this.hydrateHistoricalOpenPrices(requiredOpenTimes);
+  }
+
+  private async hydrateHistoricalOpenPrices(openTimes: number[]): Promise<void> {
     const now = Date.now();
-    const missingOpenTimes = requiredOpenTimes.filter((openTime) => {
-      if (this.historicalCandles.has(openTime) || this.liveCandles.has(openTime)) {
+    const missingOpenTimes = openTimes.filter((openTime) => {
+      if (this.historicalCandles.has(openTime)) {
         return false;
       }
 
@@ -473,8 +479,7 @@ class PolymarketChainlinkCandleSource {
     const candles: Candle[] = [];
     for (let index = 1; index <= closedLimit; index += 1) {
       const openTime = currentOpenTime - index * this.intervalMs;
-      const candle = this.historicalCandles.get(openTime) ?? this.liveCandles.get(openTime);
-      const resolvedCandle = candle ?? this.buildCandleFromAdjacentOpen(openTime);
+      const resolvedCandle = this.getClosedCandle(openTime);
       if (!resolvedCandle) {
         break;
       }
@@ -483,6 +488,45 @@ class PolymarketChainlinkCandleSource {
     }
 
     return candles.reverse();
+  }
+
+  private getClosedCandle(openTime: number): Candle | null {
+    const historicalCandle = this.historicalCandles.get(openTime);
+    if (historicalCandle) {
+      return historicalCandle;
+    }
+
+    const liveCandle = this.liveCandles.get(openTime);
+    if (liveCandle) {
+      return this.withHistoricalOpen(openTime, liveCandle);
+    }
+
+    return this.buildCandleFromAdjacentOpen(openTime);
+  }
+
+  private withHistoricalOpen(openTime: number, candle: Candle): Candle {
+    const open = this.historicalOpenPrices.get(openTime);
+    if (open === undefined || candle.open === open) {
+      return candle;
+    }
+
+    const adjustedCandle = buildCandle(
+      openTime,
+      this.intervalMs,
+      open,
+      Math.max(candle.high, open),
+      Math.min(candle.low, open),
+      candle.close
+    );
+    this.liveCandles.set(openTime, adjustedCandle);
+    return adjustedCandle;
+  }
+
+  private syncLiveCandleOpenFromHistoricalOpen(openTime: number): void {
+    const liveCandle = this.liveCandles.get(openTime);
+    if (liveCandle) {
+      this.withHistoricalOpen(openTime, liveCandle);
+    }
   }
 
   private buildCandleFromAdjacentOpen(openTime: number): Candle | null {
@@ -502,7 +546,7 @@ class PolymarketChainlinkCandleSource {
   private getCurrentCandle(currentOpenTime: number, previousClosedCandle: Candle | undefined): Candle {
     const liveCandle = this.liveCandles.get(currentOpenTime);
     if (liveCandle) {
-      return liveCandle;
+      return this.withHistoricalOpen(currentOpenTime, liveCandle);
     }
 
     const fallbackPrice = this.lastTick?.value ?? previousClosedCandle?.close;
