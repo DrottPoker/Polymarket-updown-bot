@@ -471,25 +471,25 @@ class PolymarketChainlinkCandleSource {
 
   private getContiguousClosedCandles(currentOpenTime: number, closedLimit: number): Candle[] {
     const candles: Candle[] = [];
-    for (let index = closedLimit; index >= 1; index -= 1) {
+    for (let index = 1; index <= closedLimit; index += 1) {
       const openTime = currentOpenTime - index * this.intervalMs;
       const candle = this.historicalCandles.get(openTime) ?? this.liveCandles.get(openTime);
       const resolvedCandle = candle ?? this.buildCandleFromAdjacentOpen(openTime);
       if (!resolvedCandle) {
-        throw new Error(
-          `Missing Polymarket Chainlink candle for ${new Date(openTime).toISOString()}; waiting for Gamma metadata or RTDS live data`
-        );
+        break;
       }
 
       candles.push(resolvedCandle);
     }
 
-    return candles;
+    return candles.reverse();
   }
 
   private buildCandleFromAdjacentOpen(openTime: number): Candle | null {
-    const open = this.historicalOpenPrices.get(openTime);
+    const previousCandle =
+      this.historicalCandles.get(openTime - this.intervalMs) ?? this.liveCandles.get(openTime - this.intervalMs);
     const nextCandle = this.historicalCandles.get(openTime + this.intervalMs) ?? this.liveCandles.get(openTime + this.intervalMs);
+    const open = this.historicalOpenPrices.get(openTime) ?? previousCandle?.close;
     if (open === undefined || !nextCandle) {
       return null;
     }

@@ -118,6 +118,8 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 `priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
 
+During startup, the bot warms up from the latest contiguous closed Polymarket/Chainlink candles it can build. If older Gamma metadata has a gap, the bot starts with the newer contiguous history instead of repeatedly failing on that old candle.
+
 The no-trade window blocks new entries only. The bot still manages already-open orders, cancels due orders, resolves results, and keeps strategy state current. The time window is checked against the target contract candle open time, so early entry will also be blocked for a contract that opens inside the window.
 
 Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already fully filled.

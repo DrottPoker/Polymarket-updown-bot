@@ -72,6 +72,7 @@ src/
 
 - Historical warmup candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice` as close.
 - Live/current candles are aggregated from Polymarket RTDS `crypto_prices_chainlink` WebSocket updates.
+- Warmup uses the latest contiguous closed candles available. If older Gamma metadata has a gap, startup continues with the newer contiguous history instead of blocking on that old candle.
 
 Use `priceSource: "binance"` only for comparison/backtesting against Binance candles. Binance can disagree with Polymarket settlement for current Chainlink-resolved markets.
 

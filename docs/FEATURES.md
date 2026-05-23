@@ -205,6 +205,8 @@ It uses:
 
 This keeps the bot closer to the price source used by Polymarket crypto Up/Down settlement.
 
+Warmup uses the newest contiguous closed candles available from Gamma metadata and RTDS data. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy.
+
 ## Binance Candle Source
 
 Configured with:
