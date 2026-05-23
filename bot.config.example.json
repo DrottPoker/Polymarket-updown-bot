@@ -29,6 +29,7 @@
   "googleSheetsSpreadsheetId": "",
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
+  "googleSheetsOrderEventsSheetName": "Order Events",
   "executionMode": "paper",
   "liveTradingEnabled": false,
   "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS",

@@ -1,10 +1,12 @@
 import { createSign } from "node:crypto";
 import { AppConfig } from "../config/appConfig";
-import { LiveOrder, ResolvedPaperTrade } from "../domain/types";
+import { LiveOrder, OrderEvent, ResolvedPaperTrade } from "../domain/types";
 import {
+  buildOrderEventRow,
   buildStatsCsvValuesFromRows,
   buildTradeResultRow,
   CsvRow,
+  orderEventCsvColumns,
   statsCsvColumns,
   tradeCsvColumns,
 } from "./logger";
@@ -100,6 +102,7 @@ export class GoogleSheetsLogger {
   async clearLogs(): Promise<void> {
     await this.ensureSheets();
     await this.replaceValues(this.config.googleSheetsTradesSheetName, tradeCsvColumns.length, [tradeCsvColumns]);
+    await this.replaceValues(this.config.googleSheetsOrderEventsSheetName, orderEventCsvColumns.length, [orderEventCsvColumns]);
     await this.refreshStats();
   }
 
@@ -107,6 +110,12 @@ export class GoogleSheetsLogger {
     await this.ensureSheets();
     const row = normalizeValues([buildTradeResultRow(trade, liveOrder)]);
     await this.appendValues(this.config.googleSheetsTradesSheetName, tradeCsvColumns.length, row);
+  }
+
+  async appendOrderEvent(event: OrderEvent): Promise<void> {
+    await this.ensureSheets();
+    const row = normalizeValues([buildOrderEventRow(event)]);
+    await this.appendValues(this.config.googleSheetsOrderEventsSheetName, orderEventCsvColumns.length, row);
   }
 
   async refreshStats(): Promise<void> {
@@ -122,8 +131,10 @@ export class GoogleSheetsLogger {
     const titles = await this.getSheetTitles();
     await this.ensureSheetExists(this.config.googleSheetsTradesSheetName, titles);
     await this.ensureSheetExists(this.config.googleSheetsStatsSheetName, titles);
+    await this.ensureSheetExists(this.config.googleSheetsOrderEventsSheetName, titles);
     await this.ensureHeader(this.config.googleSheetsTradesSheetName, tradeCsvColumns);
     await this.ensureHeader(this.config.googleSheetsStatsSheetName, statsCsvColumns);
+    await this.ensureHeader(this.config.googleSheetsOrderEventsSheetName, orderEventCsvColumns);
   }
 
   private async ensureSheetExists(sheetName: string, titles: Set<string>): Promise<void> {

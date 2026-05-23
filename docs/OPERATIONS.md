@@ -153,7 +153,8 @@ Enable Google Sheets logging in `bot.config.json`:
   "googleSheetsEnabled": true,
   "googleSheetsSpreadsheetId": "SPREADSHEET_ID",
   "googleSheetsTradesSheetName": "Trades",
-  "googleSheetsStatsSheetName": "Stats"
+  "googleSheetsStatsSheetName": "Stats",
+  "googleSheetsOrderEventsSheetName": "Order Events"
 }
 ```
 
@@ -164,7 +165,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from the configured `Trades` tab in Google Sheets. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
+Google Sheets stats are calculated from the configured `Trades` tab in Google Sheets. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
 
 When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is recommended when Google Sheets is your main trade log on a VPS.
 
@@ -180,7 +181,7 @@ To show the built-in script guide without clearing anything:
 npm run sheets:clear:help
 ```
 
-This clears the configured `Trades` tab back to its header row and rebuilds the configured `Stats` tab from that blank trade log. It does not delete or edit local `trades.csv` or `stats.csv`.
+This clears the configured `Trades` and `Order Events` tabs back to their header rows and rebuilds the configured `Stats` tab from that blank trade log. It does not delete or edit local `trades.csv` or `stats.csv`.
 
 ## Dry Run
 

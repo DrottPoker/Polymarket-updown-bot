@@ -356,7 +356,8 @@ Configured with:
   "googleSheetsEnabled": true,
   "googleSheetsSpreadsheetId": "your-spreadsheet-id",
   "googleSheetsTradesSheetName": "Trades",
-  "googleSheetsStatsSheetName": "Stats"
+  "googleSheetsStatsSheetName": "Stats",
+  "googleSheetsOrderEventsSheetName": "Order Events"
 }
 ```
 
@@ -369,7 +370,14 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-The bot creates the configured `Trades` and `Stats` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from rows already present in that same Google Sheets `Trades` tab.
+The bot creates the configured `Trades`, `Stats`, and `Order Events` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from rows already present in that same Google Sheets `Trades` tab.
+
+The `Order Events` tab records live execution events that are not trades:
+
+- `ORDER_PLACED`: a real live limit order was posted.
+- `ORDER_FILLED`: a live order was fully filled and logged as a trade.
+- `FINAL_CHECK_CANCELED`: a primary or secondary early-entry order was canceled by the final one-second validation.
+- `ORDER_NOT_FILLED`: an order reached candle close without being fully filled.
 
 Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard. When Google Sheets is the main production log, `localCsvLoggingEnabled` can be set to `false` so the bot does not create or change local CSV files.
 
@@ -385,7 +393,7 @@ Run this to show the built-in guide without clearing anything:
 npm run sheets:clear:help
 ```
 
-The clear script only affects the configured Google Sheets `Trades` and `Stats` tabs. It does not modify local CSV files.
+The clear script only affects the configured Google Sheets `Trades`, `Order Events`, and `Stats` tabs. It does not modify local CSV files.
 
 Google Sheets failures are logged as errors, but they do not stop trade management. If local CSV logging is enabled, it continues separately.
 

@@ -51,6 +51,7 @@ type BotConfigFile = Partial<{
   googleSheetsSpreadsheetId: string;
   googleSheetsTradesSheetName: string;
   googleSheetsStatsSheetName: string;
+  googleSheetsOrderEventsSheetName: string;
 }>;
 
 type ConfigKey = keyof BotConfigFile;
@@ -109,6 +110,7 @@ export type AppConfig = {
   googleSheetsSpreadsheetId: string;
   googleSheetsTradesSheetName: string;
   googleSheetsStatsSheetName: string;
+  googleSheetsOrderEventsSheetName: string;
   googleServiceAccountEmail: string;
   googlePrivateKey: string;
 };
@@ -275,6 +277,7 @@ export function loadConfig(): AppConfig {
     googleSheetsSpreadsheetId: readString(configFile, "googleSheetsSpreadsheetId", ""),
     googleSheetsTradesSheetName: readString(configFile, "googleSheetsTradesSheetName", "Trades"),
     googleSheetsStatsSheetName: readString(configFile, "googleSheetsStatsSheetName", "Stats"),
+    googleSheetsOrderEventsSheetName: readString(configFile, "googleSheetsOrderEventsSheetName", "Order Events"),
     googleServiceAccountEmail: readSecretString("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
     googlePrivateKey: readGooglePrivateKey(),
   };
@@ -428,8 +431,17 @@ function validateGoogleSheetsConfig(config: AppConfig): void {
     throw new Error("googleSheetsStatsSheetName must not be empty");
   }
 
-  if (config.googleSheetsTradesSheetName === config.googleSheetsStatsSheetName) {
-    throw new Error("googleSheetsTradesSheetName and googleSheetsStatsSheetName must be different");
+  if (!config.googleSheetsOrderEventsSheetName) {
+    throw new Error("googleSheetsOrderEventsSheetName must not be empty");
+  }
+
+  const sheetNames = [
+    config.googleSheetsTradesSheetName,
+    config.googleSheetsStatsSheetName,
+    config.googleSheetsOrderEventsSheetName,
+  ];
+  if (new Set(sheetNames).size !== sheetNames.length) {
+    throw new Error("googleSheetsTradesSheetName, googleSheetsStatsSheetName, and googleSheetsOrderEventsSheetName must be different");
   }
 
   if (!config.googleServiceAccountEmail.includes("@")) {

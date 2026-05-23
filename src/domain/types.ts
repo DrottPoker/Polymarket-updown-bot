@@ -12,6 +12,8 @@ export type ExecutionMode = "paper" | "live_dry_run" | "live";
 
 export type PriceSource = "binance" | "polymarket_chainlink";
 
+export type OrderEventType = "ORDER_PLACED" | "ORDER_FILLED" | "FINAL_CHECK_CANCELED" | "ORDER_NOT_FILLED";
+
 export type Candle = {
   openTime: number;
   closeTime: number;
@@ -87,4 +89,12 @@ export type LiveOrder = {
   filledSize?: number;
   canceled: boolean;
   cancelResponse?: unknown;
+};
+
+export type OrderEvent = {
+  eventTime: number;
+  eventType: OrderEventType;
+  trade: PaperTrade;
+  liveOrder?: LiveOrder | null;
+  detail?: string;
 };

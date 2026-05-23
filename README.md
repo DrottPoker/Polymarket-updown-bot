@@ -112,7 +112,8 @@ Enable it in `bot.config.json`:
   "googleSheetsEnabled": true,
   "googleSheetsSpreadsheetId": "your-spreadsheet-id",
   "googleSheetsTradesSheetName": "Trades",
-  "googleSheetsStatsSheetName": "Stats"
+  "googleSheetsStatsSheetName": "Stats",
+  "googleSheetsOrderEventsSheetName": "Order Events"
 }
 ```
 
@@ -123,13 +124,15 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from rows that exist in the configured `Trades` tab. Local CSV trades are not imported or counted in the Google Sheets dashboard. Google Sheets errors are logged, but they do not stop the bot from managing trades.
+Google Sheets stats are calculated from rows that exist in the configured `Trades` tab. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so they can be analyzed without being counted as filled trades. Local CSV trades are not imported or counted in the Google Sheets dashboard. Google Sheets errors are logged, but they do not stop the bot from managing trades.
 
 To clear the Google Sheets trade log and restart the dashboard from zero:
 
 ```bash
 npm run sheets:clear
 ```
+
+This also clears the configured `Order Events` tab.
 
 To print the built-in guide without clearing anything:
 

@@ -16,6 +16,7 @@ function printHelp(): void {
   console.log("");
   console.log("What it does:");
   console.log("  - Clears the configured Google Sheets Trades tab back to the header row.");
+  console.log("  - Clears the configured Google Sheets Order Events tab back to the header row.");
   console.log("  - Rebuilds the configured Google Sheets Stats tab from the now-empty Trades tab.");
   console.log("  - Does not delete the spreadsheet itself.");
   console.log("  - Does not edit local trades.csv or stats.csv files.");
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
   console.log(`spreadsheet: ${config.googleSheetsSpreadsheetId}`);
   console.log(`trades sheet: ${config.googleSheetsTradesSheetName}`);
   console.log(`stats sheet: ${config.googleSheetsStatsSheetName}`);
+  console.log(`order events sheet: ${config.googleSheetsOrderEventsSheetName}`);
 
   const logger = new GoogleSheetsLogger(config);
   await logger.clearLogs();

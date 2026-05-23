@@ -1,5 +1,5 @@
 import { loadConfig } from "./config/appConfig";
-import { Candle, LiveOrder, PaperTrade, ResolvedPaperTrade } from "./domain/types";
+import { Candle, LiveOrder, OrderEventType, PaperTrade, ResolvedPaperTrade } from "./domain/types";
 import {
   appendTradeResult,
   ensureCsvLog,
@@ -238,6 +238,29 @@ async function cancelPendingLiveOrder(): Promise<void> {
   }
 }
 
+async function syncGoogleSheetsOrderEvent(
+  eventType: OrderEventType,
+  trade: PaperTrade,
+  liveOrder?: LiveOrder | null,
+  detail?: string
+): Promise<void> {
+  if (!googleSheetsLogger) {
+    return;
+  }
+
+  try {
+    await googleSheetsLogger.appendOrderEvent({
+      eventTime: Date.now(),
+      eventType,
+      trade,
+      liveOrder,
+      detail,
+    });
+  } catch (error) {
+    logError(error);
+  }
+}
+
 async function refreshPendingLiveOrderFillStatus(): Promise<void> {
   if (!liveExecutor || !pendingLiveOrder) {
     return;
@@ -309,6 +332,7 @@ async function cancelInvalidatedPendingEarlyEntry(currentCandle: Candle, reason:
   }
 
   if (pendingLiveOrder?.canceled) {
+    await syncGoogleSheetsOrderEvent("FINAL_CHECK_CANCELED", pendingTrade, pendingLiveOrder, reason);
     pendingTrade = null;
     pendingLiveOrder = null;
     clearPendingEarlyEntryTracking();
@@ -339,6 +363,7 @@ async function openTrade(trade: PaperTrade, sourceCandleOpenTime: number): Promi
       pendingTrade = trade;
       riskManager.recordOrderPlaced(trade.signalTime);
       logLiveOrder(pendingLiveOrder);
+      await syncGoogleSheetsOrderEvent("ORDER_PLACED", trade, pendingLiveOrder);
       return true;
     } catch (error) {
       logError(error);
@@ -501,6 +526,12 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         logSkip(
           `${new Date(candle.openTime).toISOString()} live order was not fully filled${liveFillProgress(pendingLiveOrder)}; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
         );
+        await syncGoogleSheetsOrderEvent(
+          "ORDER_NOT_FILLED",
+          pendingTrade,
+          pendingLiveOrder,
+          "Order was not fully filled by candle close"
+        );
         strategy.recordTradeResult(strategyOnlyTrade, candle);
         pendingTrade = null;
         pendingLiveOrder = null;
@@ -513,6 +544,9 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       logResult(resolvedTrade);
       writeLocalTradeLogs(resolvedTrade, pendingLiveOrder);
       await syncGoogleSheetsTrade(resolvedTrade, pendingLiveOrder);
+      if (liveExecutor && pendingLiveOrder) {
+        await syncGoogleSheetsOrderEvent("ORDER_FILLED", pendingTrade, pendingLiveOrder, "Order was fully filled and logged as a trade");
+      }
       strategy.recordTradeResult(resolvedTrade, candle);
       riskManager.recordResolvedTrade(resolvedTrade);
       pendingTrade = null;

@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { AppConfig } from "../config/appConfig";
-import { LiveOrder, PaperTrade, ResolvedPaperTrade } from "../domain/types";
+import { LiveOrder, OrderEvent, PaperTrade, ResolvedPaperTrade } from "../domain/types";
 
 export const tradeCsvColumns = [
   "signal_time",
@@ -43,6 +43,34 @@ export const statsCsvColumns = [
   "avg_entry_cents",
 ];
 export const statsCsvHeader = statsCsvColumns.join(",");
+
+export const orderEventCsvColumns = [
+  "event_time",
+  "event_type",
+  "signal_time",
+  "candle_open_time",
+  "candle_close_time",
+  "symbol",
+  "direction",
+  "kind",
+  "entry_stage",
+  "entry_cents",
+  "stake_usd",
+  "shares",
+  "reason",
+  "detail",
+  "market_slug",
+  "polymarket_outcome",
+  "token_id",
+  "order_id",
+  "live_status",
+  "live_filled",
+  "filled_size",
+  "live_price",
+  "live_size",
+  "canceled",
+];
+export const orderEventCsvHeader = orderEventCsvColumns.join(",");
 
 export type CsvRow = Record<string, string>;
 
@@ -178,6 +206,23 @@ function inferTradeKind(row: CsvRow): string {
   return "";
 }
 
+function inferEntryStage(reason: string): string {
+  const normalized = reason.toLowerCase();
+  if (normalized.includes("primary early")) {
+    return "Primary";
+  }
+
+  if (normalized.includes("secondary early")) {
+    return "Secondary";
+  }
+
+  if (normalized.includes("final early")) {
+    return "Final";
+  }
+
+  return "Regular";
+}
+
 function bucketToCsvRow(updatedAt: string, bucket: StatsBucket): Array<string | number> {
   const winrate = bucket.trades > 0 ? (bucket.wins / bucket.trades) * 100 : 0;
   const avgPnl = bucket.trades > 0 ? bucket.pnl / bucket.trades : 0;
@@ -277,6 +322,7 @@ export function logStartup(config: AppConfig): void {
   if (config.googleSheetsEnabled) {
     console.log(`google trades sheet: ${config.googleSheetsTradesSheetName}`);
     console.log(`google stats sheet: ${config.googleSheetsStatsSheetName}`);
+    console.log(`google order events sheet: ${config.googleSheetsOrderEventsSheetName}`);
   }
 }
 
@@ -405,6 +451,35 @@ export function buildTradeResultRow(
     liveOrder?.filled,
     liveOrder?.price,
     liveOrder?.size,
+  ];
+}
+
+export function buildOrderEventRow(event: OrderEvent): Array<string | number | boolean | null | undefined> {
+  return [
+    toIso(event.eventTime),
+    event.eventType,
+    toIso(event.trade.signalTime),
+    toIso(event.trade.candleOpenTime),
+    toIso(event.trade.candleCloseTime),
+    event.trade.symbol,
+    event.trade.direction,
+    event.trade.kind,
+    inferEntryStage(event.trade.reason),
+    event.trade.entryCents,
+    event.trade.stakeUsd,
+    Number(event.trade.shares.toFixed(8)),
+    event.trade.reason,
+    event.detail,
+    event.liveOrder?.marketSlug,
+    event.liveOrder?.outcome,
+    event.liveOrder?.tokenId,
+    event.liveOrder?.orderId,
+    event.liveOrder?.status,
+    event.liveOrder?.filled,
+    event.liveOrder?.filledSize,
+    event.liveOrder?.price,
+    event.liveOrder?.size,
+    event.liveOrder?.canceled,
   ];
 }
 
