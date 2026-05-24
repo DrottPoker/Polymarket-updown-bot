@@ -96,6 +96,21 @@ export class TradingViewReversalStrategy {
     return { ...this.stats };
   }
 
+  clone(): TradingViewReversalStrategy {
+    const clone = new TradingViewReversalStrategy(this.config);
+    clone.candles.push(...this.candles);
+    Object.assign(clone.stats, this.stats);
+    clone.barIndex = this.barIndex;
+    clone.waitingForRetry = this.waitingForRetry;
+    clone.retryReady = this.retryReady;
+    clone.retryTrendColor = this.retryTrendColor;
+    clone.waitedCandles = this.waitedCandles;
+    clone.blockedAfterLoss = this.blockedAfterLoss;
+    clone.blockedTrendColor = this.blockedTrendColor;
+    clone.resetBarIndex = this.resetBarIndex;
+    return clone;
+  }
+
   getSignalForNextCandle(): StrategyDecision {
     return this.evaluateSignal(false);
   }

@@ -97,9 +97,9 @@ Builds candle data aligned with Polymarket crypto Up/Down settlement.
 It combines:
 
 - Polymarket Gamma event metadata for resolved historical candles.
-- Polymarket RTDS `crypto_prices_chainlink` WebSocket ticks for the current live candle.
+- Polymarket RTDS `crypto_prices_chainlink` WebSocket ticks for current and provisional live candles.
 
-Closed candles are resolved from Gamma metadata only. Live RTDS ticks are used to track the current forming candle, but they are not used to settle a closed trade.
+Closed trade settlement is resolved from Gamma metadata only. Live RTDS ticks are used to track the current forming candle and to build provisional closed candles while Gamma is delayed. Those provisional candles are decision-only input and are not used to settle trades or permanently update strategy state.
 
 It keeps a per-source in-memory cache, reconnects the WebSocket when needed, and closes socket resources on shutdown.
 

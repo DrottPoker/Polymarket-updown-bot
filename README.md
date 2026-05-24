@@ -72,7 +72,7 @@ src/
 
 - Historical warmup and closed trade settlement candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice`, or the next event `priceToBeat`, as close.
 - If Gamma has resolved a market outcome but has not published a numeric final price, the bot uses that official `Up` or `Down` outcome to build a directional fallback candle.
-- Closed candles are not settled from live RTDS ticks. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence for warmup but waits before new entries until the missing closed candle is available.
+- Closed candles are not settled from live RTDS ticks. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence for warmup and can use live provisional candles for entry decisions only.
 - Live/current candles are aggregated from Polymarket RTDS `crypto_prices_chainlink` WebSocket updates.
 - Warmup uses the latest contiguous closed candles available. If older Gamma metadata has a gap, startup continues with the newer contiguous history instead of blocking on that old candle.
 - If the bot starts after a candle is already open, the live candle open is corrected from Polymarket Gamma `priceToBeat` or the previous official close when available instead of using the first live tick seen by the bot.
@@ -90,7 +90,7 @@ When using `polymarket_chainlink`, `polymarketAssetSlug` selects the Chainlink s
 - When retry logic is off, a loss blocks same-trend continuation until the trend breaks and 3 fresh candles have formed.
 - The bot warms up strategy state from `candleLimit` candles at startup.
 - Optional early entry can place the next contract order before candle close when the forming candle is already the third trend candle.
-- If the latest official closed Polymarket candle is delayed, early-entry checks can still place the next contract from the live forming candle, while result settlement and candle-open entries wait for official Gamma data.
+- If the latest official closed Polymarket candle is delayed, entry decisions can use live provisional candles so the bot still knows the latest trend chain. Result settlement still waits for official Gamma data.
 - The startup candle is skipped for entries, then logged with its resolved open, close, and color when it closes.
 
 ## Spreadsheet Logs

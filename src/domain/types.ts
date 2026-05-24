@@ -1,5 +1,7 @@
 export type CandleColor = "green" | "red" | "doji";
 
+export type CandleSettlement = "official" | "provisional";
+
 export type Direction = "UP" | "DOWN";
 
 export type TradeResult = "WIN" | "LOSS";
@@ -22,6 +24,7 @@ export type Candle = {
   low: number;
   close: number;
   color: CandleColor;
+  settlement?: CandleSettlement;
 };
 
 export type StrategySignal = {

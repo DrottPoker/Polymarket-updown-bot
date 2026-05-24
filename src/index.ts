@@ -122,6 +122,36 @@ function formatCandleForLog(candle: Candle): string {
   return `${candle.color} open=${candle.open.toFixed(2)} close=${candle.close.toFixed(2)}`;
 }
 
+function isOfficialSettlementCandle(candle: Candle): boolean {
+  return candle.settlement !== "provisional";
+}
+
+function getUnprocessedDecisionPreviewCandles(closedCandles: Candle[]): Candle[] {
+  return closedCandles
+    .filter((candle) => candle.openTime > lastProcessedClosedCandleOpenTime)
+    .sort((a, b) => a.openTime - b.openTime);
+}
+
+function buildDecisionStrategy(previewCandles: Candle[]): TradingViewReversalStrategy {
+  if (previewCandles.length === 0) {
+    return strategy;
+  }
+
+  const decisionStrategy = strategy.clone();
+  for (const candle of previewCandles) {
+    decisionStrategy.processClosedCandleWithoutTrade(candle);
+  }
+
+  return decisionStrategy;
+}
+
+function hasClosedCandleForDecision(requiredOpenTime: number, previewCandles: Candle[]): boolean {
+  return (
+    lastProcessedClosedCandleOpenTime >= requiredOpenTime ||
+    previewCandles.some((candle) => candle.openTime === requiredOpenTime)
+  );
+}
+
 function logInsufficientCandles(candleCount: number, now: number): void {
   if (now - lastInsufficientCandlesLogTime < 30_000) {
     return;
@@ -131,13 +161,17 @@ function logInsufficientCandles(candleCount: number, now: number): void {
   logSkip(`Waiting for at least 4 Polymarket candles; received ${candleCount}`);
 }
 
-function logWaitingForOfficialClosedCandle(openTime: number, now: number): void {
+function logWaitingForOfficialClosedCandle(openTime: number, now: number, previewCandles: Candle[]): void {
   if (now - lastOfficialClosedCandleWaitLogTime < 30_000) {
     return;
   }
 
   lastOfficialClosedCandleWaitLogTime = now;
-  logSkip(`${new Date(openTime).toISOString()} waiting for official Polymarket closed candle`);
+  const previewDetail =
+    previewCandles.length > 0
+      ? `; using ${previewCandles.length} provisional candle(s) for entry decisions only`
+      : "";
+  logSkip(`${new Date(openTime).toISOString()} waiting for official Polymarket closed candle${previewDetail}`);
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
@@ -464,7 +498,11 @@ function writeLocalTradeLogs(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | 
   refreshStatsLog(config.logFile, config.statsFile);
 }
 
-async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<void> {
+async function maybeOpenEarlyEntry(
+  currentCandle: Candle,
+  now: number,
+  decisionStrategy: TradingViewReversalStrategy
+): Promise<void> {
   if (!config.earlyEntryEnabled || pendingTrade || pendingStrategyOnlyTrade) {
     return;
   }
@@ -487,7 +525,7 @@ async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<
 
   earlyEntryAttemptedStages.add(stage.name);
 
-  const decision = strategy.getEarlySignalForNextCandle(currentCandle, {
+  const decision = decisionStrategy.getEarlySignalForNextCandle(currentCandle, {
     label: stage.label,
     minMovePct: stage.minMovePct,
   });
@@ -509,7 +547,11 @@ async function maybeOpenEarlyEntry(currentCandle: Candle, now: number): Promise<
   }
 }
 
-async function maybeValidatePendingEarlyEntry(currentCandle: Candle, now: number): Promise<void> {
+async function maybeValidatePendingEarlyEntry(
+  currentCandle: Candle,
+  now: number,
+  decisionStrategy: TradingViewReversalStrategy
+): Promise<void> {
   if (!pendingTrade || !pendingEarlyEntryTargetOpenTime || pendingEarlyEntryFinalValidationDone) {
     return;
   }
@@ -528,7 +570,7 @@ async function maybeValidatePendingEarlyEntry(currentCandle: Candle, now: number
     return;
   }
 
-  const decision = strategy.getEarlySignalForNextCandle(currentCandle, {
+  const decision = decisionStrategy.getEarlySignalForNextCandle(currentCandle, {
     label: "final early-entry validation",
     minMovePct: null,
   });
@@ -639,33 +681,37 @@ async function tick(): Promise<void> {
 
   const currentCandle = candles[candles.length - 1];
   const closedCandles = candles.slice(0, -1);
+  const officialClosedCandles = closedCandles.filter(isOfficialSettlementCandle);
   const intervalMs = currentCandle.closeTime - currentCandle.openTime + 1;
   const requiredPreviousClosedOpenTime = currentCandle.openTime - intervalMs;
 
-  if (candles.length < 4 && !initialized) {
-    logInsufficientCandles(candles.length, now);
+  if (officialClosedCandles.length < 3 && !initialized) {
+    logInsufficientCandles(officialClosedCandles.length + 1, now);
     return;
   }
 
   if (!initialized) {
-    warmUpStrategy(closedCandles);
+    warmUpStrategy(officialClosedCandles);
     skipStartupCandle(currentCandle);
     return;
   } else {
-    await processNewClosedCandles(closedCandles);
+    await processNewClosedCandles(officialClosedCandles);
   }
 
   await cancelPendingLiveOrderIfDue(now);
 
-  await maybeValidatePendingEarlyEntry(currentCandle, now);
-  await maybeOpenEarlyEntry(currentCandle, now);
+  const previewCandles = getUnprocessedDecisionPreviewCandles(closedCandles);
+  const decisionStrategy = buildDecisionStrategy(previewCandles);
 
-  if (lastProcessedClosedCandleOpenTime < requiredPreviousClosedOpenTime) {
-    logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now);
+  await maybeValidatePendingEarlyEntry(currentCandle, now, decisionStrategy);
+  await maybeOpenEarlyEntry(currentCandle, now, decisionStrategy);
+
+  if (currentCandle.openTime === lastHandledCandleOpenTime) {
     return;
   }
 
-  if (currentCandle.openTime === lastHandledCandleOpenTime) {
+  if (!hasClosedCandleForDecision(requiredPreviousClosedOpenTime, previewCandles)) {
+    logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now, previewCandles);
     return;
   }
 
@@ -684,7 +730,7 @@ async function tick(): Promise<void> {
     return;
   }
 
-  const decision = strategy.getSignalForNextCandle();
+  const decision = decisionStrategy.getSignalForNextCandle();
   if (!decision.signal) {
     logSkip(`${new Date(currentCandle.openTime).toISOString()} ${decision.reason}`);
     lastHandledCandleOpenTime = currentCandle.openTime;
