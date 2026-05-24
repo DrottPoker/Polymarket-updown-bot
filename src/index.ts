@@ -657,13 +657,13 @@ async function tick(): Promise<void> {
 
   await cancelPendingLiveOrderIfDue(now);
 
+  await maybeValidatePendingEarlyEntry(currentCandle, now);
+  await maybeOpenEarlyEntry(currentCandle, now);
+
   if (lastProcessedClosedCandleOpenTime < requiredPreviousClosedOpenTime) {
     logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now);
     return;
   }
-
-  await maybeValidatePendingEarlyEntry(currentCandle, now);
-  await maybeOpenEarlyEntry(currentCandle, now);
 
   if (currentCandle.openTime === lastHandledCandleOpenTime) {
     return;

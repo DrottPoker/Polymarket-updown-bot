@@ -207,7 +207,9 @@ This keeps the bot closer to the price source used by Polymarket crypto Up/Down 
 
 Closed trade results are resolved from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle so the strategy can keep moving without using live RTDS ticks as settlement. Live RTDS ticks are used for the current forming candle, not for settling a closed trade.
 
-Warmup uses the newest contiguous closed candles available from Gamma metadata. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence but waits before new entries until the missing closed candle is available.
+Warmup uses the newest contiguous closed candles available from Gamma metadata. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence but waits before result settlement and candle-open entries until the missing closed candle is available.
+
+Early-entry checks are the exception to that wait. They can still place the next contract from the live forming candle while the newest official closed candle is delayed. Result settlement and candle-open entries continue to wait for official Gamma data.
 
 When the process starts in the middle of a candle, the first RTDS tick is not treated as the official candle open. The bot corrects the live candle open from Gamma `priceToBeat` or the previous official close when available, then uses RTDS updates for the live close.
 

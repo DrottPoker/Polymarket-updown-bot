@@ -90,6 +90,7 @@ When using `polymarket_chainlink`, `polymarketAssetSlug` selects the Chainlink s
 - When retry logic is off, a loss blocks same-trend continuation until the trend breaks and 3 fresh candles have formed.
 - The bot warms up strategy state from `candleLimit` candles at startup.
 - Optional early entry can place the next contract order before candle close when the forming candle is already the third trend candle.
+- If the latest official closed Polymarket candle is delayed, early-entry checks can still place the next contract from the live forming candle, while result settlement and candle-open entries wait for official Gamma data.
 - The startup candle is skipped for entries, then logged with its resolved open, close, and color when it closes.
 
 ## Spreadsheet Logs
