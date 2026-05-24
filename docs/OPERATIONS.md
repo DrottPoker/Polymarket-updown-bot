@@ -119,7 +119,7 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 `priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
 
-Closed trade candles are settled from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. It does not resolve closed trades from live RTDS ticks. If Gamma has not published the latest closed candle yet, the bot waits instead of logging a provisional result.
+Closed trade candles are settled from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. It does not resolve closed trades from live RTDS ticks. If fewer than 4 candles are available, the bot waits and logs a throttled skip message instead of spamming an error every poll.
 
 `liveFullFillToleranceShares` treats tiny CLOB dust differences as full fills. With the default `0.01`, a 6-share order filled as `5.9936` is logged as a full 6-share fill.
 

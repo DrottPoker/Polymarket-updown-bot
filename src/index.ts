@@ -46,6 +46,7 @@ let pendingTrade: PaperTrade | null = null;
 let pendingStrategyOnlyTrade: PaperTrade | null = null;
 let pendingLiveOrder: LiveOrder | null = null;
 let startupSkippedCandleOpenTime: number | null = null;
+let lastInsufficientCandlesLogTime = 0;
 let shuttingDown = false;
 
 type EarlyEntryStage = {
@@ -118,6 +119,15 @@ function clearPendingEarlyEntryTracking(): void {
 
 function formatCandleForLog(candle: Candle): string {
   return `${candle.color} open=${candle.open.toFixed(2)} close=${candle.close.toFixed(2)}`;
+}
+
+function logInsufficientCandles(candleCount: number, now: number): void {
+  if (now - lastInsufficientCandlesLogTime < 30_000) {
+    return;
+  }
+
+  lastInsufficientCandlesLogTime = now;
+  logSkip(`Waiting for at least 4 Polymarket candles; received ${candleCount}`);
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
@@ -611,13 +621,14 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
 
 async function tick(): Promise<void> {
   const candles = await fetchCandles(config, config.candleLimit);
+  const now = Date.now();
   if (candles.length < 4) {
-    throw new Error(`Need at least 4 candles, received ${candles.length}`);
+    logInsufficientCandles(candles.length, now);
+    return;
   }
 
   const currentCandle = candles[candles.length - 1];
   const closedCandles = candles.slice(0, -1);
-  const now = Date.now();
 
   if (!initialized) {
     warmUpStrategy(closedCandles);

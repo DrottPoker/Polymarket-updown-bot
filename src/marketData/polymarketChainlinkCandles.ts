@@ -8,9 +8,16 @@ type GammaEventMetadata = {
   finalPrice?: number | string;
 };
 
+type GammaMarket = {
+  outcomes?: string[] | string;
+  outcomePrices?: string[] | string;
+  closed?: boolean;
+};
+
 type GammaEvent = {
   slug?: string;
   eventMetadata?: GammaEventMetadata | null;
+  markets?: GammaMarket[];
 };
 
 type RtdsMessage = {
@@ -79,6 +86,23 @@ function toFiniteNumber(value: number | string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseStringArray(value: string[] | string | undefined): string[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeGammaEvents(value: unknown): GammaEvent[] {
   if (Array.isArray(value)) {
     return value as GammaEvent[];
@@ -93,6 +117,38 @@ function normalizeGammaEvents(value: unknown): GammaEvent[] {
 
 function chainlinkSymbolForAsset(assetSlug: string): string {
   return `${assetSlug.toLowerCase()}/usd`;
+}
+
+function resolvedOutcomeFromGammaEvent(event: GammaEvent | undefined): "up" | "down" | null {
+  const market = event?.markets?.[0];
+  if (!market?.closed) {
+    return null;
+  }
+
+  const outcomes = parseStringArray(market.outcomes).map((outcome) => outcome.toLowerCase());
+  const outcomePrices = parseStringArray(market.outcomePrices).map(Number);
+  const winnerIndex = outcomePrices.findIndex((price) => Number.isFinite(price) && price >= 0.999);
+  const winner = winnerIndex >= 0 ? outcomes[winnerIndex] : "";
+
+  if (winner === "up") {
+    return "up";
+  }
+
+  if (winner === "down") {
+    return "down";
+  }
+
+  return null;
+}
+
+function fallbackCloseFromResolvedOutcome(open: number, event: GammaEvent | undefined): number | null {
+  const resolvedOutcome = resolvedOutcomeFromGammaEvent(event);
+  if (!resolvedOutcome) {
+    return null;
+  }
+
+  const minMove = Math.max(Math.abs(open) * 0.000001, 0.000001);
+  return resolvedOutcome === "up" ? open + minMove : open - minMove;
 }
 
 function websocketStateName(socket: WebSocket | null): string {
@@ -456,9 +512,15 @@ class PolymarketChainlinkCandleSource {
 
   private candleFromGammaEvents(openTime: number, event: GammaEvent | undefined, nextEvent: GammaEvent | undefined): Candle | null {
     const open = toFiniteNumber(event?.eventMetadata?.priceToBeat);
+    if (open === null) {
+      return null;
+    }
+
     const close =
-      toFiniteNumber(event?.eventMetadata?.finalPrice) ?? toFiniteNumber(nextEvent?.eventMetadata?.priceToBeat);
-    if (open === null || close === null) {
+      toFiniteNumber(event?.eventMetadata?.finalPrice) ??
+      toFiniteNumber(nextEvent?.eventMetadata?.priceToBeat) ??
+      fallbackCloseFromResolvedOutcome(open, event);
+    if (close === null) {
       return null;
     }
 

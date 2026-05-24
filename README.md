@@ -71,7 +71,8 @@ src/
 `priceSource: "polymarket_chainlink"` makes the bot use the same reference family as current Polymarket crypto Up/Down markets:
 
 - Historical warmup and closed trade settlement candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice`, or the next event `priceToBeat`, as close.
-- Closed candles are not settled from live RTDS ticks. If Gamma metadata for the latest closed candle is not ready yet, the bot waits instead of resolving a trade from provisional live data.
+- If Gamma has resolved a market outcome but has not published a numeric final price, the bot uses that official `Up` or `Down` outcome to build a directional fallback candle.
+- Closed candles are not settled from live RTDS ticks. If fewer than 4 Polymarket candles are available, the bot waits and logs a throttled skip message instead of resolving from provisional live data.
 - Live/current candles are aggregated from Polymarket RTDS `crypto_prices_chainlink` WebSocket updates.
 - Warmup uses the latest contiguous closed candles available. If older Gamma metadata has a gap, startup continues with the newer contiguous history instead of blocking on that old candle.
 - If the bot starts after a candle is already open, the live candle open is corrected from Polymarket Gamma `priceToBeat` or the previous official close when available instead of using the first live tick seen by the bot.
