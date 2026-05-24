@@ -46,5 +46,6 @@
   "maxStakeUsd": 3,
   "maxDailyLossUsd": 50,
   "maxTradesPerDay": 50,
-  "maxLiveTradeWindowSeconds": 300
+  "maxLiveTradeWindowSeconds": 300,
+  "liveFullFillToleranceShares": 0.01
 }

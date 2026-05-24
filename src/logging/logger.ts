@@ -188,6 +188,20 @@ function addTradeToBucket(bucket: StatsBucket, row: CsvRow): void {
   bucket.entryCents += Number(row.entry_cents || 0);
 }
 
+function isTruthy(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+function isRealizedTradeRow(row: CsvRow): boolean {
+  const orderId = row.order_id?.trim() ?? "";
+  if (!orderId) {
+    return true;
+  }
+
+  return isTruthy(row.live_filled);
+}
+
 function inferTradeKind(row: CsvRow): string {
   const kind = row.kind?.toUpperCase();
   if (kind === "BASE" || kind === "RETRY") {
@@ -311,6 +325,7 @@ export function logStartup(config: AppConfig): void {
     console.log(`max daily loss: $${config.maxDailyLossUsd}`);
     console.log(`max trades/day: ${config.maxTradesPerDay}`);
     console.log(`max live window: ${config.maxLiveTradeWindowSeconds}s`);
+    console.log(`live full-fill tolerance: ${config.liveFullFillToleranceShares} shares`);
   }
   console.log(`poll: ${config.pollMs}ms`);
   console.log(`local csv logging: ${config.localCsvLoggingEnabled}`);
@@ -503,6 +518,10 @@ export function buildStatsCsvValuesFromRows(rows: CsvRow[]): Array<Array<string 
   const bucketByScope = new Map(buckets.map((bucket) => [bucket.scope, bucket]));
 
   for (const row of rows) {
+    if (!isRealizedTradeRow(row)) {
+      continue;
+    }
+
     const kind = inferTradeKind(row);
     const direction = row.direction?.toUpperCase();
     addTradeToBucket(bucketByScope.get("TOTAL") as StatsBucket, row);

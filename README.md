@@ -70,10 +70,11 @@ src/
 
 `priceSource: "polymarket_chainlink"` makes the bot use the same reference family as current Polymarket crypto Up/Down markets:
 
-- Historical warmup candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice` as close.
+- Historical warmup and closed trade settlement candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice`, or the next event `priceToBeat`, as close.
+- Closed candles are not settled from live RTDS ticks. If Gamma metadata for the latest closed candle is not ready yet, the bot waits instead of resolving a trade from provisional live data.
 - Live/current candles are aggregated from Polymarket RTDS `crypto_prices_chainlink` WebSocket updates.
 - Warmup uses the latest contiguous closed candles available. If older Gamma metadata has a gap, startup continues with the newer contiguous history instead of blocking on that old candle.
-- If the bot starts after a candle is already open, the live candle open is corrected from Polymarket Gamma `priceToBeat` when available instead of using the first live tick seen by the bot.
+- If the bot starts after a candle is already open, the live candle open is corrected from Polymarket Gamma `priceToBeat` or the previous official close when available instead of using the first live tick seen by the bot.
 
 Use `priceSource: "binance"` only for comparison/backtesting against Binance candles. Binance can disagree with Polymarket settlement for current Chainlink-resolved markets.
 
@@ -124,7 +125,9 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from rows that exist in the configured `Trades` tab. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so they can be analyzed without being counted as filled trades. Local CSV trades are not imported or counted in the Google Sheets dashboard. Google Sheets errors are logged, but they do not stop the bot from managing trades.
+Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so they can be analyzed without being counted as filled trades. Local CSV trades are not imported or counted in the Google Sheets dashboard. Google Sheets errors are logged, but they do not stop the bot from managing trades.
+
+For live trades, `live_status` is the initial Polymarket order status. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
 To clear the Google Sheets trade log and restart the dashboard from zero:
 
@@ -176,7 +179,8 @@ Real live mode additionally uses:
 - Automatic cancel at `candleOpenTime + tradeWindowSeconds`.
 - Fill checking through authenticated CLOB order and trade data before any due cancel is sent.
 - Full-fill confirmation based on successful CLOB trade records for the specific order id. The initial post response status is not enough to count a live trade as filled.
-- An unfilled or partially filled canceled order updates strategy state hypothetically but does not create a trade row.
+- A zero-fill canceled order updates strategy state hypothetically but does not create a trade row.
+- A partially filled canceled order logs the filled portion as a realized trade and still updates strategy state using the signal result.
 
 To dry-run against Polymarket without placing orders, use `npm run dry-run`. For manual config, set this in `bot.config.json`:
 
@@ -203,11 +207,14 @@ Then set live guards and risk limits in `bot.config.json`:
   "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS",
   "polymarketSignatureType": 3,
   "tradeWindowSeconds": 60,
-  "maxLiveTradeWindowSeconds": 60
+  "maxLiveTradeWindowSeconds": 60,
+  "liveFullFillToleranceShares": 0.01
 }
 ```
 
 For new Polymarket API users, signature type `3` is the deposit wallet flow. The funder address should be the deposit wallet address. You can optionally set `CLOB_API_KEY`, `CLOB_SECRET`, and `CLOB_PASS_PHRASE`; otherwise the bot derives API credentials at startup with the private key.
+
+`liveFullFillToleranceShares` treats tiny CLOB dust differences as full fills. With the default `0.01`, a 6-share order filled as `5.9936` is logged as a full 6-share fill.
 
 Keep `executionMode: "paper"` while testing. `npm run live` forces live mode for that process, but it still requires the live guards above. `RUN_ONCE` is blocked in live mode so the bot cannot place an order and exit before the cancel/fill loop runs.
 

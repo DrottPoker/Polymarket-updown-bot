@@ -205,9 +205,11 @@ It uses:
 
 This keeps the bot closer to the price source used by Polymarket crypto Up/Down settlement.
 
-Warmup uses the newest contiguous closed candles available from Gamma metadata and RTDS data. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy.
+Closed trade results are resolved from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. Live RTDS ticks are used for the current forming candle, not for settling a closed trade.
 
-When the process starts in the middle of a candle, the first RTDS tick is not treated as the official candle open. The bot corrects the live candle open from Gamma `priceToBeat` when available, then uses RTDS updates for the live close.
+Warmup uses the newest contiguous closed candles available from Gamma metadata. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy. If the latest closed candle is not available from Gamma yet, the bot waits before processing new signals or logging results.
+
+When the process starts in the middle of a candle, the first RTDS tick is not treated as the official candle open. The bot corrects the live candle open from Gamma `priceToBeat` or the previous official close when available, then uses RTDS updates for the live close.
 
 ## Binance Candle Source
 
@@ -262,9 +264,9 @@ The bot keeps polling while the order is pending.
 
 If the order fills, the resolved trade is logged after candle close.
 
-Before a due cancel is sent, the bot checks authenticated CLOB trade records for successful matched size on the specific order id. If the order is already fully filled, it logs `[LIVE_FILL]` and does not send the cancel.
+Before a due cancel is sent, the bot checks authenticated CLOB trade records for successful matched size on the specific order id. If the order is already fully filled, it logs `[LIVE_FILL]` and does not send the cancel. Tiny CLOB dust differences are treated as full fills using `liveFullFillToleranceShares`.
 
-If the order does not fully fill, the order is canceled when due. The strategy state is still updated hypothetically after candle close, but no real trade row is written.
+If the order does not fully fill, the order is canceled when due. A non-zero partial fill outside the tolerance is logged proportionally. A zero-fill order updates strategy state hypothetically after candle close, but no real trade row is written.
 
 ## Runtime Risk Limits
 
@@ -276,7 +278,8 @@ Configured with:
   "maxStakeUsd": 5,
   "maxDailyLossUsd": 50,
   "maxTradesPerDay": 50,
-  "maxLiveTradeWindowSeconds": 300
+  "maxLiveTradeWindowSeconds": 300,
+  "liveFullFillToleranceShares": 0.01
 }
 ```
 
@@ -287,6 +290,8 @@ Risk checks block live and dry-run orders when:
 - Max trades per day has been reached.
 - Realized daily loss limit has been reached.
 - Live trade window exceeds the configured max.
+
+`liveFullFillToleranceShares` is a dust tolerance for CLOB fill accounting. With the default `0.01`, a 6-share order filled as `5.9936` is treated as a full 6-share fill.
 
 Risk counters are in-memory for the running process.
 
@@ -370,14 +375,16 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-The bot creates the configured `Trades`, `Stats`, and `Order Events` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from rows already present in that same Google Sheets `Trades` tab.
+The bot creates the configured `Trades`, `Stats`, and `Order Events` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from realized rows already present in that same Google Sheets `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`.
 
 The `Order Events` tab records live execution events that are not trades:
 
 - `ORDER_PLACED`: a real live limit order was posted.
 - `ORDER_FILLED`: a live order was fully filled and logged as a trade.
 - `FINAL_CHECK_CANCELED`: a primary or secondary early-entry order was canceled by the final one-second validation.
-- `ORDER_NOT_FILLED`: an order reached candle close without being fully filled.
+- `ORDER_NOT_FILLED`: an order reached candle close without being fully filled. If `filled_size` is greater than zero, the filled portion is still logged proportionally in `Trades`.
+
+`live_status` is the initial status returned by Polymarket when the order was posted. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
 Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard. When Google Sheets is the main production log, `localCsvLoggingEnabled` can be set to `false` so the bot does not create or change local CSV files.
 

@@ -109,8 +109,13 @@ function tradeFilledSizeForOrder(order: LiveOrder, trade: Trade): number {
     .reduce((filledSize, makerOrder) => filledSize + parsePositiveNumber(makerOrder.matched_amount), 0);
 }
 
-function isFullyFilled(order: LiveOrder, filledSize: number): boolean {
-  return filledSize >= order.size * 0.999;
+function normalizeFilledSize(order: LiveOrder, filledSize: number, toleranceShares: number): number {
+  const boundedFilledSize = Math.min(Math.max(filledSize, 0), order.size);
+  return order.size - boundedFilledSize <= toleranceShares ? order.size : boundedFilledSize;
+}
+
+function isFullyFilled(order: LiveOrder, filledSize: number, toleranceShares: number): boolean {
+  return normalizeFilledSize(order, filledSize, toleranceShares) >= order.size;
 }
 
 function getTickSize(value: string): TickSize {
@@ -247,10 +252,11 @@ export class PolymarketLiveExecutor {
     }
 
     const filledSize = await this.getFilledSizeOrZero(order);
-    if (isFullyFilled(order, filledSize)) {
+    const normalizedFilledSize = normalizeFilledSize(order, filledSize, this.config.liveFullFillToleranceShares);
+    if (isFullyFilled(order, filledSize, this.config.liveFullFillToleranceShares)) {
       return {
         ...order,
-        filledSize,
+        filledSize: normalizedFilledSize,
         filled: true,
       };
     }
@@ -264,10 +270,15 @@ export class PolymarketLiveExecutor {
     }
 
     const filledSizeBeforeCancel = await this.getFilledSizeOrZero(order);
-    if (isFullyFilled(order, filledSizeBeforeCancel)) {
+    const normalizedFilledSizeBeforeCancel = normalizeFilledSize(
+      order,
+      filledSizeBeforeCancel,
+      this.config.liveFullFillToleranceShares
+    );
+    if (isFullyFilled(order, filledSizeBeforeCancel, this.config.liveFullFillToleranceShares)) {
       return {
         ...order,
-        filledSize: filledSizeBeforeCancel,
+        filledSize: normalizedFilledSizeBeforeCancel,
         filled: true,
       };
     }
@@ -275,10 +286,12 @@ export class PolymarketLiveExecutor {
     const client = await this.getTradingClient();
     const cancelResponse = await client.cancelOrder({ orderID: order.orderId });
     const filledSizeAfterCancel = await this.getFilledSizeOrZero(order);
+    const maxFilledSize = Math.max(filledSizeBeforeCancel, filledSizeAfterCancel);
+    const normalizedFilledSizeAfterCancel = normalizeFilledSize(order, maxFilledSize, this.config.liveFullFillToleranceShares);
     return {
       ...order,
-      filled: order.filled || isFullyFilled(order, filledSizeAfterCancel),
-      filledSize: Math.max(filledSizeBeforeCancel, filledSizeAfterCancel),
+      filled: order.filled || isFullyFilled(order, maxFilledSize, this.config.liveFullFillToleranceShares),
+      filledSize: normalizedFilledSizeAfterCancel,
       canceled: true,
       cancelResponse,
     };
@@ -290,10 +303,11 @@ export class PolymarketLiveExecutor {
     }
 
     const filledSize = await this.getFilledSizeOrZero(order);
+    const normalizedFilledSize = normalizeFilledSize(order, filledSize, this.config.liveFullFillToleranceShares);
     return {
       ...order,
-      filled: isFullyFilled(order, filledSize),
-      filledSize,
+      filled: isFullyFilled(order, filledSize, this.config.liveFullFillToleranceShares),
+      filledSize: normalizedFilledSize,
     };
   }
 

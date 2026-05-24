@@ -188,7 +188,7 @@ export class GoogleSheetsLogger {
 
   private async appendValues(sheetName: string, columnCount: number, values: SheetValue[][]): Promise<void> {
     const range = sheetRange(sheetName, `A:${columnName(columnCount)}`);
-    await this.requestJson("POST", `/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+    await this.requestJson("POST", `/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=OVERWRITE`, {
       values,
     });
   }

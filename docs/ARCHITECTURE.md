@@ -99,6 +99,8 @@ It combines:
 - Polymarket Gamma event metadata for resolved historical candles.
 - Polymarket RTDS `crypto_prices_chainlink` WebSocket ticks for the current live candle.
 
+Closed candles are resolved from Gamma metadata only. Live RTDS ticks are used to track the current forming candle, but they are not used to settle a closed trade.
+
 It keeps a per-source in-memory cache, reconnects the WebSocket when needed, and closes socket resources on shutdown.
 
 ### `src/polymarket/marketDiscovery.ts`
@@ -268,7 +270,8 @@ sleep pollMs
 5. A GTC limit BUY order is posted.
 6. The bot tracks the order until fill, cancel time, or candle resolution.
 7. If the order is fully filled according to authenticated successful CLOB trade records, the resolved trade is logged to the configured log targets.
-8. If the order is not fully filled, the strategy state still updates hypothetically, but no real trade row is created.
+8. If the order has a non-zero partial fill, the filled portion is logged as a realized trade and the strategy state updates from the signal outcome.
+9. If the order has zero fill, the strategy state still updates hypothetically, but no real trade row is created.
 
 ## Early Entry Flow
 

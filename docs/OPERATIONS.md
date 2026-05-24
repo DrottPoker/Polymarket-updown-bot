@@ -77,7 +77,8 @@ nano .env
   "stakeUsd": 5,
   "maxStakeUsd": 5,
   "maxDailyLossUsd": 25,
-  "maxTradesPerDay": 20
+  "maxTradesPerDay": 20,
+  "liveFullFillToleranceShares": 0.01
 }
 ```
 
@@ -118,9 +119,13 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 `priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
 
+Closed trade candles are settled from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. It does not resolve closed trades from live RTDS ticks. If Gamma has not published the latest closed candle yet, the bot waits instead of logging a provisional result.
+
+`liveFullFillToleranceShares` treats tiny CLOB dust differences as full fills. With the default `0.01`, a 6-share order filled as `5.9936` is logged as a full 6-share fill.
+
 During startup, the bot warms up from the latest contiguous closed Polymarket/Chainlink candles it can build. If older Gamma metadata has a gap, the bot starts with the newer contiguous history instead of repeatedly failing on that old candle.
 
-If the bot starts in the middle of a live candle, the candle open is corrected from Gamma `priceToBeat` when available. This avoids treating the first RTDS tick seen after process start as the official Polymarket open.
+If the bot starts in the middle of a live candle, the candle open is corrected from Gamma `priceToBeat` or the previous official close when available. This avoids treating the first RTDS tick seen after process start as the official Polymarket open.
 
 The no-trade window blocks new entries only. The bot still manages already-open orders, cancels due orders, resolves results, and keeps strategy state current. The time window is checked against the target contract candle open time, so early entry will also be blocked for a contract that opens inside the window.
 
@@ -165,7 +170,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from the configured `Trades` tab in Google Sheets. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
+Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
 
 When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is recommended when Google Sheets is your main trade log on a VPS.
 
@@ -225,7 +230,7 @@ Do not run manual live mode at the same time as PM2.
 
 When a live order fills after it was first posted as `filled: false`, the bot logs `[LIVE_FILL]` once authenticated CLOB trade records show successful matched size for the specific order id. The bot checks for a full fill before sending a due cancel, so already-filled orders should not be canceled just because the initial post response said `filled: false`.
 
-The initial order response status is not enough to count a live trade. If the order is not fully matched, the bot cancels it when due, updates strategy state hypothetically, and does not write a real trade row to Google Sheets or local CSV.
+The initial order response status is not enough to count a live trade. `live_status` is the status returned when the order was posted. `live` usually means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. In these trade rows, `live_filled=TRUE` is the field that matters for realized stats. If the order has zero fill, the bot cancels it when due, updates strategy state hypothetically, and does not write a real trade row to Google Sheets or local CSV.
 
 ## Run 24/7 With PM2
 

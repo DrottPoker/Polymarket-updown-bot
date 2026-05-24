@@ -1,5 +1,5 @@
 import { AppConfig } from "../config/appConfig";
-import { Candle, PaperTrade, ResolvedPaperTrade, StrategySignal } from "../domain/types";
+import { Candle, LiveOrder, PaperTrade, ResolvedPaperTrade, StrategySignal } from "../domain/types";
 
 export function createPaperTrade(
   config: AppConfig,
@@ -38,5 +38,19 @@ export function resolvePaperTrade(trade: PaperTrade, resolvedCandle: Candle): Re
     close: resolvedCandle.close,
     result: won ? "WIN" : "LOSS",
     pnl: won ? trade.maxProfit : -trade.stakeUsd,
+  };
+}
+
+export function resizeTradeToLiveFill(trade: PaperTrade, liveOrder: LiveOrder): PaperTrade {
+  const filledShares = Math.min(Math.max(liveOrder.filledSize ?? 0, 0), liveOrder.size);
+  const entryDecimal = liveOrder.price > 0 ? liveOrder.price : trade.entryCents / 100;
+  const stakeUsd = filledShares * entryDecimal;
+
+  return {
+    ...trade,
+    entryCents: entryDecimal * 100,
+    stakeUsd,
+    shares: filledShares,
+    maxProfit: filledShares - stakeUsd,
   };
 }

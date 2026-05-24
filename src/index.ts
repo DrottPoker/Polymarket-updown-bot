@@ -19,7 +19,7 @@ import { GoogleSheetsLogger } from "./logging/googleSheetsLogger";
 import { fetchCandles } from "./marketData/candles";
 import { closePolymarketChainlinkCandleSources } from "./marketData/polymarketChainlinkCandles";
 import { PolymarketLiveExecutor } from "./polymarket/liveExecutor";
-import { createPaperTrade, resolvePaperTrade } from "./trading/paperBroker";
+import { createPaperTrade, resizeTradeToLiveFill, resolvePaperTrade } from "./trading/paperBroker";
 import { RuntimeRiskManager } from "./trading/riskManager";
 import { TradingViewReversalStrategy } from "./trading/strategy";
 
@@ -126,6 +126,30 @@ function liveFillProgress(order: LiveOrder | null): string {
   }
 
   return `; matched ${order.filledSize.toFixed(4)} of ${order.size.toFixed(4)} shares`;
+}
+
+function liveFilledSize(order: LiveOrder | null): number {
+  if (!order || !order.filledSize || order.filledSize <= 0) {
+    return 0;
+  }
+
+  const filledSize = Math.min(order.filledSize, order.size);
+  return order.size - filledSize <= config.liveFullFillToleranceShares ? order.size : filledSize;
+}
+
+function hasPartialLiveFill(order: LiveOrder | null): order is LiveOrder {
+  return Boolean(order && !order.filled && liveFilledSize(order) > 0);
+}
+
+function liveOrderForFilledPortion(order: LiveOrder): LiveOrder {
+  const filledSize = liveFilledSize(order);
+  return {
+    ...order,
+    size: filledSize,
+    filledSize,
+    filled: true,
+    status: order.filled ? order.status : "partial",
+  };
 }
 
 function clockTimeToMinutes(value: string): number {
@@ -523,6 +547,30 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       }
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
         const strategyOnlyTrade = resolvePaperTrade(pendingTrade, candle);
+        if (hasPartialLiveFill(pendingLiveOrder)) {
+          const realizedLiveOrder = liveOrderForFilledPortion(pendingLiveOrder);
+          const realizedTrade = resolvePaperTrade(resizeTradeToLiveFill(pendingTrade, realizedLiveOrder), candle);
+          logSkip(
+            `${new Date(candle.openTime).toISOString()} live order was partially filled${liveFillProgress(pendingLiveOrder)}; logging realized partial trade and updating strategy state as ${strategyOnlyTrade.result}`
+          );
+          logResult(realizedTrade);
+          writeLocalTradeLogs(realizedTrade, realizedLiveOrder);
+          await syncGoogleSheetsTrade(realizedTrade, realizedLiveOrder);
+          await syncGoogleSheetsOrderEvent(
+            "ORDER_NOT_FILLED",
+            pendingTrade,
+            pendingLiveOrder,
+            "Order was partially filled by candle close and logged proportionally"
+          );
+          strategy.recordTradeResult(strategyOnlyTrade, candle);
+          riskManager.recordResolvedTrade(realizedTrade);
+          pendingTrade = null;
+          pendingLiveOrder = null;
+          clearPendingEarlyEntryTracking();
+          lastProcessedClosedCandleOpenTime = candle.openTime;
+          continue;
+        }
+
         logSkip(
           `${new Date(candle.openTime).toISOString()} live order was not fully filled${liveFillProgress(pendingLiveOrder)}; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
         );
