@@ -538,18 +538,28 @@ class PolymarketChainlinkCandleSource {
   }
 
   private getContiguousClosedCandles(currentOpenTime: number, closedLimit: number): Candle[] {
-    const candles: Candle[] = [];
-    for (let index = 1; index <= closedLimit; index += 1) {
-      const openTime = currentOpenTime - index * this.intervalMs;
-      const resolvedCandle = this.getClosedCandle(openTime);
-      if (!resolvedCandle) {
-        break;
+    for (let startIndex = 1; startIndex <= closedLimit; startIndex += 1) {
+      const newestOpenTime = currentOpenTime - startIndex * this.intervalMs;
+      const newestCandle = this.getClosedCandle(newestOpenTime);
+      if (!newestCandle) {
+        continue;
       }
 
-      candles.push(resolvedCandle);
+      const candles: Candle[] = [newestCandle];
+      for (let index = startIndex + 1; index <= closedLimit; index += 1) {
+        const openTime = currentOpenTime - index * this.intervalMs;
+        const resolvedCandle = this.getClosedCandle(openTime);
+        if (!resolvedCandle) {
+          break;
+        }
+
+        candles.push(resolvedCandle);
+      }
+
+      return candles.reverse();
     }
 
-    return candles.reverse();
+    return [];
   }
 
   private getClosedCandle(openTime: number): Candle | null {

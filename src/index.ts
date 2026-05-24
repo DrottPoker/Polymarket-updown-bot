@@ -47,6 +47,7 @@ let pendingStrategyOnlyTrade: PaperTrade | null = null;
 let pendingLiveOrder: LiveOrder | null = null;
 let startupSkippedCandleOpenTime: number | null = null;
 let lastInsufficientCandlesLogTime = 0;
+let lastOfficialClosedCandleWaitLogTime = 0;
 let shuttingDown = false;
 
 type EarlyEntryStage = {
@@ -128,6 +129,15 @@ function logInsufficientCandles(candleCount: number, now: number): void {
 
   lastInsufficientCandlesLogTime = now;
   logSkip(`Waiting for at least 4 Polymarket candles; received ${candleCount}`);
+}
+
+function logWaitingForOfficialClosedCandle(openTime: number, now: number): void {
+  if (now - lastOfficialClosedCandleWaitLogTime < 30_000) {
+    return;
+  }
+
+  lastOfficialClosedCandleWaitLogTime = now;
+  logSkip(`${new Date(openTime).toISOString()} waiting for official Polymarket closed candle`);
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
@@ -622,13 +632,20 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
 async function tick(): Promise<void> {
   const candles = await fetchCandles(config, config.candleLimit);
   const now = Date.now();
-  if (candles.length < 4) {
+  if (candles.length === 0) {
     logInsufficientCandles(candles.length, now);
     return;
   }
 
   const currentCandle = candles[candles.length - 1];
   const closedCandles = candles.slice(0, -1);
+  const intervalMs = currentCandle.closeTime - currentCandle.openTime + 1;
+  const requiredPreviousClosedOpenTime = currentCandle.openTime - intervalMs;
+
+  if (candles.length < 4 && !initialized) {
+    logInsufficientCandles(candles.length, now);
+    return;
+  }
 
   if (!initialized) {
     warmUpStrategy(closedCandles);
@@ -639,6 +656,12 @@ async function tick(): Promise<void> {
   }
 
   await cancelPendingLiveOrderIfDue(now);
+
+  if (lastProcessedClosedCandleOpenTime < requiredPreviousClosedOpenTime) {
+    logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now);
+    return;
+  }
+
   await maybeValidatePendingEarlyEntry(currentCandle, now);
   await maybeOpenEarlyEntry(currentCandle, now);
 
