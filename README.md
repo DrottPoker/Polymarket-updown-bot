@@ -75,7 +75,7 @@ fixtures/
 
 - Historical warmup and closed trade settlement candles come from Polymarket Gamma event metadata: `priceToBeat` as open and `finalPrice`, or the next event `priceToBeat`, as close.
 - If Gamma has resolved a market outcome but has not published a numeric final price, the bot uses that official `Up` or `Down` outcome to build a directional fallback candle.
-- Closed candles used for trend history must be official Polymarket/Gamma candles. If the newest closed candle is not official yet, the bot waits before making new entry decisions.
+- Closed candles used for trend history prefer official Polymarket/Gamma candles. If the newest closed candle is not official yet but RTDS has the open and close, the bot can use that provisional closed candle so entries do not stall.
 - Live/current candles are aggregated from Polymarket RTDS `crypto_prices_chainlink` WebSocket updates.
 - Warmup uses the latest contiguous closed candles available. If older Gamma metadata has a gap, startup continues with the newer contiguous history instead of blocking on that old candle.
 - If the bot starts after a candle is already open, the live candle open is corrected from Polymarket Gamma `priceToBeat` or the previous official close when available instead of using the first live tick seen by the bot.
@@ -93,8 +93,8 @@ When using `polymarket_chainlink`, `polymarketAssetSlug` selects the Chainlink s
 - When retry logic is off, a loss blocks same-trend continuation until the trend breaks and 3 fresh candles have formed.
 - The bot warms up strategy state from `candleLimit` candles at startup.
 - Optional early entry can place the next contract order before candle close when the forming candle is already the third trend candle.
-- If the latest official closed Polymarket candle is delayed, entry decisions wait so the 3-candle chain is based on official history. Only the current forming candle can use live RTDS data for early entry.
-- The startup candle is skipped for entries, then logged with its resolved open, close, and color when it closes.
+- If a provisional closed candle is later replaced by official Gamma metadata, the stored candle is corrected and logged with `[CANDLE_CORRECTION]`.
+- The startup candle is skipped for direct entry on that candle, but early entry for the next candle remains enabled. When it closes, it is logged with its open, close, color, and source.
 
 ## Spreadsheet Logs
 
@@ -140,7 +140,13 @@ To clear the Google Sheets trade log and restart the dashboard from zero:
 npm run sheets:clear
 ```
 
-This also clears the configured `Order Events` tab.
+This clears only the configured raw log tabs: `Trades` back to A:V headers, `Order Events` back to A:X headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset.
+
+To print the exact clear targets before changing the spreadsheet:
+
+```bash
+npm run sheets:clear:dry-run
+```
 
 To print the built-in guide without clearing anything:
 

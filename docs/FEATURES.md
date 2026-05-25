@@ -162,7 +162,7 @@ When the bot starts, it warms up strategy state from closed candles and skips th
 
 This prevents the bot from entering a trade midway through a candle that started before the process was running.
 
-When that startup candle closes, the bot logs its resolved open, close, and color, then adds it to trend state only. After that, normal signal processing resumes.
+When that startup candle closes, the bot logs its resolved open, close, color, and source, then adds it to trend state only. Direct entry on the already-open startup candle is disabled, but early entry for the next candle remains enabled.
 
 ## No-Trade Window
 
@@ -207,11 +207,11 @@ It uses:
 
 This keeps the bot closer to the price source used by Polymarket crypto Up/Down settlement.
 
-Closed trade results are resolved from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle so the strategy can keep moving without using live RTDS ticks as settlement. Live RTDS ticks are used for the current forming candle, not for settling a closed trade.
+Closed trade results prefer official Gamma metadata. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. If the newest closed candle is not official yet but RTDS has an open and close, the bot can use that provisional closed candle for trend state and entry decisions so it does not stall.
 
 Warmup uses the newest contiguous closed candles available from Gamma metadata. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy.
 
-If the newest closed candle is not official yet, the bot keeps the latest available historical sequence and waits before making new entry decisions. This keeps the 3-candle chain based on official Polymarket history. Only the current forming candle can use live RTDS data for early entry.
+If official Gamma metadata later replaces a provisional closed candle, the bot logs `[CANDLE_CORRECTION]` and updates the stored candle.
 
 When the process starts in the middle of a candle, the first RTDS tick is not treated as the official candle open. The bot corrects the live candle open from Gamma `priceToBeat` or the previous official close when available, then uses RTDS updates for the live close.
 
@@ -398,13 +398,19 @@ Run this to clear the Google Sheets trade log and restart the Google Sheets dash
 npm run sheets:clear
 ```
 
+Run this to print the exact clear targets before changing the spreadsheet:
+
+```bash
+npm run sheets:clear:dry-run
+```
+
 Run this to show the built-in guide without clearing anything:
 
 ```bash
 npm run sheets:clear:help
 ```
 
-The clear script only affects the configured Google Sheets `Trades`, `Order Events`, and `Stats` tabs. It does not modify local CSV files.
+The clear script only affects the configured raw Google Sheets tabs: `Trades` back to A:V headers, `Order Events` back to A:X headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. It does not reset `Setup` inputs and does not modify local CSV files.
 
 Google Sheets failures are logged as errors, but they do not stop trade management. If local CSV logging is enabled, it continues separately.
 

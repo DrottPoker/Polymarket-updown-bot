@@ -250,7 +250,7 @@ function assertSignal(
 }
 
 function buildDecisionStrategy(context: ReplayContext, previewCandles: CandleInput[] | undefined): TradingViewReversalStrategy {
-  const preview = (previewCandles ?? []).filter((candleInput) => (candleInput.settlement ?? "official") === "official");
+  const preview = previewCandles ?? [];
   if (preview.length === 0) {
     return context.strategy;
   }

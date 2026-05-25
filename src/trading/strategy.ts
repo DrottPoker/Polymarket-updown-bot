@@ -96,6 +96,24 @@ export class TradingViewReversalStrategy {
     return { ...this.stats };
   }
 
+  getRecentProcessedCandles(count: number): Candle[] {
+    return this.candles.slice(-count);
+  }
+
+  getRecentTrendColors(count: number): TrendColor[] {
+    return this.getLastTrendColorsBeforeCurrent(count).reverse();
+  }
+
+  replaceProcessedCandle(candle: Candle): boolean {
+    const index = this.candles.findIndex((processedCandle) => processedCandle.openTime === candle.openTime);
+    if (index < 0) {
+      return false;
+    }
+
+    this.candles[index] = candle;
+    return true;
+  }
+
   clone(): TradingViewReversalStrategy {
     const clone = new TradingViewReversalStrategy(this.config);
     clone.candles.push(...this.candles);
@@ -471,7 +489,7 @@ export class TradingViewReversalStrategy {
 
     return {
       signal: null,
-      reason: `last 3 trend candles were ${last3TrendColors.join(", ")}`,
+      reason: `last 3 trend candles were ${last3TrendColors.reverse().join(", ")} (oldest -> newest)`,
     };
   }
 

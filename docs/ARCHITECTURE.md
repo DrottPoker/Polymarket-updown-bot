@@ -113,7 +113,7 @@ It combines:
 - Polymarket Gamma event metadata for resolved historical candles.
 - Polymarket RTDS `crypto_prices_chainlink` WebSocket ticks for the current forming candle.
 
-Closed trade settlement and closed-candle trend history are resolved from Gamma metadata only. Live RTDS ticks are used to track the current forming candle for early entry, but closed RTDS candles are not allowed to complete the 3-candle chain because they can disagree with official Polymarket settlement.
+Closed trade settlement and closed-candle trend history prefer Gamma metadata. Live RTDS ticks track the current forming candle for early entry, and a closed RTDS candle may be used provisionally when Gamma metadata lags so the 3-candle chain can keep moving. If official Gamma metadata later replaces a provisional candle, the bot logs a correction and updates the stored candle.
 
 It keeps a per-source in-memory cache, reconnects the WebSocket when needed, and closes socket resources on shutdown.
 

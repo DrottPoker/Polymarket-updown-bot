@@ -3,11 +3,14 @@ import { Candle, LiveOrder, OrderEventType, PaperTrade, ResolvedPaperTrade } fro
 import {
   appendTradeResult,
   ensureCsvLog,
+  logCandleCorrection,
+  logCandleDecision,
   logError,
   logLiveCancel,
   logLiveDryRun,
   logLiveFill,
   logLiveOrder,
+  logRecentClosedCandles,
   logResult,
   logSignal,
   logSkip,
@@ -52,8 +55,10 @@ let pendingStrategyOnlyTrade: PaperTrade | null = null;
 let pendingLiveOrder: LiveOrder | null = null;
 let startupSkippedCandleOpenTime: number | null = null;
 let lastInsufficientCandlesLogTime = 0;
-let lastOfficialClosedCandleWaitLogTime = 0;
+let lastClosedCandleDataWaitOpenTime = 0;
 let lastPendingTradeSkipOpenTime = 0;
+let lastDecisionLogTargetOpenTime = 0;
+const processedClosedCandlesByOpenTime = new Map<number, Candle>();
 let shuttingDown = false;
 
 function sleep(ms: number): Promise<void> {
@@ -99,14 +104,12 @@ function clearPendingEarlyEntryTracking(): void {
 }
 
 function formatCandleForLog(candle: Candle): string {
-  return `${candle.color} open=${candle.open.toFixed(2)} close=${candle.close.toFixed(2)}`;
+  return `${candle.color} open=${candle.open.toFixed(2)} close=${candle.close.toFixed(2)} source=${
+    candle.settlement ?? "official"
+  }`;
 }
 
-function isOfficialSettlementCandle(candle: Candle): boolean {
-  return candle.settlement !== "provisional";
-}
-
-function hasOfficialClosedCandleForDecision(requiredOpenTime: number): boolean {
+function hasClosedCandleForDecision(requiredOpenTime: number): boolean {
   return lastProcessedClosedCandleOpenTime >= requiredOpenTime;
 }
 
@@ -119,13 +122,13 @@ function logInsufficientCandles(candleCount: number, now: number): void {
   logSkip(`Waiting for at least 4 Polymarket candles; received ${candleCount}`);
 }
 
-function logWaitingForOfficialClosedCandle(openTime: number, now: number): void {
-  if (now - lastOfficialClosedCandleWaitLogTime < 30_000) {
+function logWaitingForClosedCandleData(openTime: number): void {
+  if (lastClosedCandleDataWaitOpenTime === openTime) {
     return;
   }
 
-  lastOfficialClosedCandleWaitLogTime = now;
-  logSkip(`${new Date(openTime).toISOString()} waiting for official Polymarket closed candle before entry decision`);
+  lastClosedCandleDataWaitOpenTime = openTime;
+  logSkip(`${new Date(openTime).toISOString()} waiting for latest closed candle data before entry decision`);
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
@@ -214,22 +217,62 @@ function getNextCandlePlaceholder(currentCandle: Candle): Candle {
   };
 }
 
+function candlesDiffer(left: Candle, right: Candle): boolean {
+  return (
+    left.open !== right.open ||
+    left.high !== right.high ||
+    left.low !== right.low ||
+    left.close !== right.close ||
+    left.color !== right.color ||
+    (left.settlement ?? "official") !== (right.settlement ?? "official")
+  );
+}
+
+function rememberProcessedClosedCandle(candle: Candle): void {
+  processedClosedCandlesByOpenTime.set(candle.openTime, candle);
+}
+
+function processOfficialClosedCandleCorrections(closedCandles: Candle[]): void {
+  for (const candle of closedCandles) {
+    if (candle.settlement === "provisional") {
+      continue;
+    }
+
+    const previous = processedClosedCandlesByOpenTime.get(candle.openTime);
+    if (!previous || previous.settlement !== "provisional" || !candlesDiffer(previous, candle)) {
+      continue;
+    }
+
+    if (strategy.replaceProcessedCandle(candle)) {
+      rememberProcessedClosedCandle(candle);
+      logCandleCorrection(previous, candle);
+    }
+  }
+}
+
 function warmUpStrategy(closedCandles: Candle[]): void {
   if (initialized) {
     return;
   }
 
   strategy.warmUp(closedCandles);
+  for (const candle of closedCandles) {
+    rememberProcessedClosedCandle(candle);
+  }
   lastProcessedClosedCandleOpenTime = closedCandles[closedCandles.length - 1]?.openTime ?? 0;
   initialized = true;
   logWarmup(closedCandles.length);
+  logRecentClosedCandles(strategy.getRecentProcessedCandles(5), strategy.getRecentTrendColors(5));
 }
 
 function skipStartupCandle(currentCandle: Candle): void {
   startupSkippedCandleOpenTime = currentCandle.openTime;
   lastHandledCandleOpenTime = currentCandle.openTime;
-  markEarlyEntryTargetDone(getNextCandlePlaceholder(currentCandle).openTime);
-  logSkip(`${new Date(currentCandle.openTime).toISOString()} startup candle is already in progress; waiting for next signal`);
+  logSkip(
+    `${new Date(
+      currentCandle.openTime
+    ).toISOString()} startup candle is already in progress; direct entry on this candle is disabled, early entry for the next candle remains enabled`
+  );
 }
 
 function logStartupSkippedCandleClosed(candle: Candle): void {
@@ -543,7 +586,18 @@ async function maybeValidatePendingEarlyEntry(
   pendingEarlyEntryFinalValidationDone = true;
 }
 
+function finishProcessedClosedCandle(candle: Candle): void {
+  const targetOpenTime = candle.closeTime + 1;
+  logStartupSkippedCandleClosed(candle);
+  rememberProcessedClosedCandle(candle);
+  logCandleDecision(candle, strategy.getRecentTrendColors(5), strategy.getSignalForNextCandle(), targetOpenTime);
+  lastDecisionLogTargetOpenTime = targetOpenTime;
+  lastProcessedClosedCandleOpenTime = candle.openTime;
+}
+
 async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
+  processOfficialClosedCandleCorrections(closedCandles);
+
   const newClosedCandles = closedCandles.filter((candle) => candle.openTime > lastProcessedClosedCandleOpenTime);
 
   for (const candle of newClosedCandles) {
@@ -581,7 +635,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
           pendingTrade = null;
           pendingLiveOrder = null;
           clearPendingEarlyEntryTracking();
-          lastProcessedClosedCandleOpenTime = candle.openTime;
+          finishProcessedClosedCandle(candle);
           continue;
         }
 
@@ -598,7 +652,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         pendingTrade = null;
         pendingLiveOrder = null;
         clearPendingEarlyEntryTracking();
-        lastProcessedClosedCandleOpenTime = candle.openTime;
+        finishProcessedClosedCandle(candle);
         continue;
       }
 
@@ -618,8 +672,7 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       strategy.processClosedCandleWithoutTrade(candle);
     }
 
-    logStartupSkippedCandleClosed(candle);
-    lastProcessedClosedCandleOpenTime = candle.openTime;
+    finishProcessedClosedCandle(candle);
   }
 }
 
@@ -633,27 +686,27 @@ async function tick(): Promise<void> {
 
   const currentCandle = candles[candles.length - 1];
   const closedCandles = candles.slice(0, -1);
-  const officialClosedCandles = closedCandles.filter(isOfficialSettlementCandle);
   const intervalMs = currentCandle.closeTime - currentCandle.openTime + 1;
   const requiredPreviousClosedOpenTime = currentCandle.openTime - intervalMs;
 
-  if (officialClosedCandles.length < 3 && !initialized) {
-    logInsufficientCandles(officialClosedCandles.length + 1, now);
+  if (closedCandles.length < 3 && !initialized) {
+    logInsufficientCandles(closedCandles.length + 1, now);
     return;
   }
 
   if (!initialized) {
-    warmUpStrategy(officialClosedCandles);
+    warmUpStrategy(closedCandles);
     skipStartupCandle(currentCandle);
     return;
   } else {
-    await processNewClosedCandles(officialClosedCandles);
+    await processNewClosedCandles(closedCandles);
   }
 
+  await refreshPendingLiveOrderFillStatus();
   await cancelPendingLiveOrderIfDue(now);
 
-  if (!hasOfficialClosedCandleForDecision(requiredPreviousClosedOpenTime)) {
-    logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now);
+  if (!hasClosedCandleForDecision(requiredPreviousClosedOpenTime)) {
+    logWaitingForClosedCandleData(requiredPreviousClosedOpenTime);
     return;
   }
 
@@ -683,7 +736,9 @@ async function tick(): Promise<void> {
 
   const decision = strategy.getSignalForNextCandle();
   if (!decision.signal) {
-    logSkip(`${new Date(currentCandle.openTime).toISOString()} ${decision.reason}`);
+    if (lastDecisionLogTargetOpenTime !== currentCandle.openTime) {
+      logSkip(`${new Date(currentCandle.openTime).toISOString()} ${decision.reason}`);
+    }
     lastHandledCandleOpenTime = currentCandle.openTime;
     return;
   }

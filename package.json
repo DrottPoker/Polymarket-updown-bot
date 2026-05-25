@@ -10,6 +10,7 @@
     "dry-run:once": "node -r ts-node/register -e \"process.env.BOT_EXECUTION_MODE='live_dry_run'; process.env.RUN_ONCE='1'; require('./src/index.ts')\"",
     "live": "node -r ts-node/register -e \"process.env.BOT_EXECUTION_MODE='live'; require('./src/index.ts')\"",
     "sheets:clear": "node -r ts-node/register src/scripts/clearGoogleSheets.ts",
+    "sheets:clear:dry-run": "node -r ts-node/register src/scripts/clearGoogleSheets.ts --dry-run",
     "sheets:clear:help": "node -r ts-node/register src/scripts/clearGoogleSheets.ts --help",
     "test:strategy": "node -r ts-node/register src/scripts/strategyReplay.ts",
     "replay:fixture": "node -r ts-node/register src/scripts/strategyReplay.ts",

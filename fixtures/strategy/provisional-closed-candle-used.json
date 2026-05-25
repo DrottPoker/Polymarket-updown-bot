@@ -1,6 +1,6 @@
 {
-  "name": "provisional closed candle ignored for entry chain",
-  "description": "A closed RTDS/provisional candle must not complete a 3-candle chain because it can disagree with official Polymarket settlement.",
+  "name": "provisional closed candle can complete entry chain",
+  "description": "A closed RTDS/provisional candle may complete a 3-candle chain so the bot can keep moving while official Gamma metadata catches up.",
   "seedCandles": [
     { "index": 1, "open": 100, "close": 99 }
   ],
@@ -15,7 +15,11 @@
         "label": "fixture final early entry",
         "minMovePct": null
       },
-      "expected": null
+      "expected": {
+        "kind": "BASE",
+        "direction": "UP",
+        "reasonIncludes": "third red trend candle"
+      }
     }
   ]
 }

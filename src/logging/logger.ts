@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { AppConfig } from "../config/appConfig";
-import { LiveOrder, OrderEvent, PaperTrade, ResolvedPaperTrade } from "../domain/types";
+import { Candle, LiveOrder, OrderEvent, PaperTrade, ResolvedPaperTrade, StrategyDecision, TrendColor } from "../domain/types";
 
 export const tradeCsvColumns = [
   "signal_time",
@@ -91,6 +91,25 @@ function toIso(ms: number): string {
 function formatMoney(value: number): string {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}$${value.toFixed(2)}`;
+}
+
+function formatCandle(candle: Candle): string {
+  const settlement = candle.settlement ?? "official";
+  return `${toIso(candle.openTime)} ${candle.color} open=${candle.open.toFixed(2)} close=${candle.close.toFixed(
+    2
+  )} source=${settlement}`;
+}
+
+function formatTrendColors(colors: TrendColor[]): string {
+  return colors.length > 0 ? colors.join(" -> ") : "none";
+}
+
+function formatDecision(decision: StrategyDecision): string {
+  if (!decision.signal) {
+    return `NO SIGNAL - ${decision.reason}`;
+  }
+
+  return `SIGNAL ${decision.signal.kind} ${decision.signal.direction} - ${decision.signal.reason}`;
 }
 
 function csvEscape(value: string | number | boolean | null | undefined): string {
@@ -345,6 +364,37 @@ export function logWarmup(closedCandles: number): void {
   console.log("");
   console.log("[WARMUP]");
   console.log(`processed closed candles: ${closedCandles}`);
+}
+
+export function logRecentClosedCandles(candles: Candle[], trendColors: TrendColor[]): void {
+  console.log("");
+  console.log("[CANDLES]");
+  console.log("latest closed candles:");
+  for (const candle of candles) {
+    console.log(`  - ${formatCandle(candle)}`);
+  }
+  console.log(`last ${trendColors.length} trend colors (oldest -> newest): ${formatTrendColors(trendColors)}`);
+}
+
+export function logCandleDecision(
+  closedCandle: Candle,
+  trendColors: TrendColor[],
+  decision: StrategyDecision,
+  targetOpenTime: number
+): void {
+  console.log("");
+  console.log("[CANDLE]");
+  console.log(`closed: ${formatCandle(closedCandle)}`);
+  console.log(`last ${trendColors.length} trend colors (oldest -> newest): ${formatTrendColors(trendColors)}`);
+  console.log(`next target: ${toIso(targetOpenTime)}`);
+  console.log(`decision: ${formatDecision(decision)}`);
+}
+
+export function logCandleCorrection(previous: Candle, corrected: Candle): void {
+  console.log("");
+  console.log("[CANDLE_CORRECTION]");
+  console.log(`previous: ${formatCandle(previous)}`);
+  console.log(`corrected: ${formatCandle(corrected)}`);
 }
 
 export function logSignal(trade: PaperTrade, tradeWindowSeconds: number): void {

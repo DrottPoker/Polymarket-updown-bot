@@ -580,7 +580,17 @@ class PolymarketChainlinkCandleSource {
       return historicalCandle;
     }
 
-    return this.buildCandleFromOfficialAdjacentOpen(openTime);
+    const adjacentOpenCandle = this.buildCandleFromOfficialAdjacentOpen(openTime);
+    if (adjacentOpenCandle) {
+      return adjacentOpenCandle;
+    }
+
+    const liveCandle = this.liveCandles.get(openTime);
+    if (liveCandle) {
+      return this.withOfficialOpen(openTime, liveCandle);
+    }
+
+    return null;
   }
 
   private withOfficialOpen(openTime: number, candle: Candle, fallbackOpen?: number): Candle {

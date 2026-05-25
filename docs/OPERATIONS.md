@@ -119,7 +119,7 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 `priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
 
-Closed trade candles are settled from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. It does not resolve closed trades from live RTDS ticks. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence and waits before making new entry decisions. This keeps the 3-candle chain based on official Polymarket history. Only the current forming candle can use live RTDS data for early entry.
+Closed trade candles prefer official Gamma metadata. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. If the newest closed candle is not official yet but RTDS has an open and close, the bot can use that provisional closed candle for trend state and entry decisions so it does not stall. If official Gamma metadata later replaces that provisional candle, the bot logs `[CANDLE_CORRECTION]` and updates the stored candle.
 
 `liveFullFillToleranceShares` treats tiny CLOB dust differences as full fills. With the default `0.01`, a 6-share order filled as `5.9936` is logged as a full 6-share fill.
 
@@ -182,13 +182,19 @@ To clear the Google Sheets trade log and reset the Google Sheets dashboard:
 npm run sheets:clear
 ```
 
+To print the exact clear targets before changing the spreadsheet:
+
+```bash
+npm run sheets:clear:dry-run
+```
+
 To show the built-in script guide without clearing anything:
 
 ```bash
 npm run sheets:clear:help
 ```
 
-This clears the configured `Trades` and `Order Events` tabs back to their header rows and rebuilds the configured `Stats` tab from that blank trade log. It does not delete or edit local `trades.csv` or `stats.csv`.
+This clears only the configured raw log tabs: `Trades` back to A:V headers, `Order Events` back to A:X headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset. It does not delete or edit local `trades.csv` or `stats.csv`.
 
 ## Strategy Replay Tests
 
@@ -201,7 +207,7 @@ npm run test:strategy
 Run a single fixture:
 
 ```bash
-npm run replay:fixture -- fixtures/strategy/provisional-closed-candle-ignored.json
+npm run replay:fixture -- fixtures/strategy/provisional-closed-candle-used.json
 ```
 
 The replay runner is offline and does not place orders. It uses fixture candles from `fixtures/strategy`, feeds them into `TradingViewReversalStrategy`, and fails with recent candle context when the actual signal does not match the expected signal.
