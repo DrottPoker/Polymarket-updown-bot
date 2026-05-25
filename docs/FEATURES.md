@@ -144,6 +144,8 @@ The bot checks three stages:
 - Secondary stage: requires the forming candle to move at least the configured secondary percentage.
 - Final stage: only requires the forming candle to have the correct red or green color.
 
+When more than one stage is already due, the bot runs the most urgent due stage. This keeps a delayed poll near candle close from spending the final check on an older primary or secondary threshold.
+
 For base signals, the forming candle must become the third same-color trend candle.
 
 For retry signals, the forming candle must continue the retry trend and satisfy the configured wait logic.

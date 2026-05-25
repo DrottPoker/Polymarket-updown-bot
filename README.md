@@ -153,6 +153,8 @@ When `earlyEntryEnabled=true`, the bot checks the forming candle in three stages
 - Secondary: at `earlyEntrySecondarySecondsBeforeClose`, require at least `earlyEntrySecondaryMinMovePct`.
 - Final: at `earlyEntryOrderSecondsBeforeClose`, require only the correct red/green forming candle for the setup.
 
+If the process reaches a later stage without having run an earlier one, it uses the later stage. For example, a tick at the final one-second check uses the color-only final rule instead of spending that tick on the older primary or secondary thresholds.
+
 For BASE setups, a third green trend candle places `DOWN` on the next contract; a third red trend candle places `UP`. For RETRY setups, the same staged checks apply when the forming candle continues the retry trend and would make retry ready.
 
 If a primary or secondary early-entry order is already pending, the final check still runs at `earlyEntryOrderSecondsBeforeClose`. If the forming candle no longer produces the same setup and direction, the bot cancels the pending order when it is not already fully filled.

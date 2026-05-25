@@ -48,6 +48,8 @@ let pendingLiveOrder: LiveOrder | null = null;
 let startupSkippedCandleOpenTime: number | null = null;
 let lastInsufficientCandlesLogTime = 0;
 let lastOfficialClosedCandleWaitLogTime = 0;
+let lastPendingTradeSkipOpenTime = 0;
+let lastProvisionalNoSignalOpenTime = 0;
 let shuttingDown = false;
 
 type EarlyEntryStage = {
@@ -105,6 +107,25 @@ function markEarlyEntryTargetDone(targetOpenTime: number): void {
   resetEarlyEntryAttemptsForTarget(targetOpenTime);
   for (const stage of getEarlyEntryStages()) {
     earlyEntryAttemptedStages.add(stage.name);
+  }
+}
+
+function getDueEarlyEntryStage(secondsLeft: number): EarlyEntryStage | null {
+  const dueStages = getEarlyEntryStages()
+    .filter(
+      (earlyEntryStage) =>
+        secondsLeft <= earlyEntryStage.secondsBeforeClose && !earlyEntryAttemptedStages.has(earlyEntryStage.name)
+    )
+    .sort((a, b) => a.secondsBeforeClose - b.secondsBeforeClose);
+
+  return dueStages[0] ?? null;
+}
+
+function markDueEarlyEntryStagesAttempted(selectedStage: EarlyEntryStage): void {
+  for (const stage of getEarlyEntryStages()) {
+    if (stage.secondsBeforeClose >= selectedStage.secondsBeforeClose) {
+      earlyEntryAttemptedStages.add(stage.name);
+    }
   }
 }
 
@@ -515,15 +536,12 @@ async function maybeOpenEarlyEntry(
   resetEarlyEntryAttemptsForTarget(nextCandle.openTime);
 
   const secondsLeft = secondsUntilCandleClose(currentCandle, now);
-  const stage = getEarlyEntryStages().find(
-    (earlyEntryStage) =>
-      secondsLeft <= earlyEntryStage.secondsBeforeClose && !earlyEntryAttemptedStages.has(earlyEntryStage.name)
-  );
+  const stage = getDueEarlyEntryStage(secondsLeft);
   if (!stage) {
     return;
   }
 
-  earlyEntryAttemptedStages.add(stage.name);
+  markDueEarlyEntryStagesAttempted(stage);
 
   const decision = decisionStrategy.getEarlySignalForNextCandle(currentCandle, {
     label: stage.label,
@@ -725,13 +743,25 @@ async function tick(): Promise<void> {
   }
 
   if (pendingTrade || pendingStrategyOnlyTrade) {
-    logSkip(`${new Date(currentCandle.openTime).toISOString()} pending trade still open`);
-    lastHandledCandleOpenTime = currentCandle.openTime;
+    if (lastPendingTradeSkipOpenTime !== currentCandle.openTime) {
+      logSkip(`${new Date(currentCandle.openTime).toISOString()} pending trade still open`);
+      lastPendingTradeSkipOpenTime = currentCandle.openTime;
+    }
     return;
   }
 
   const decision = decisionStrategy.getSignalForNextCandle();
   if (!decision.signal) {
+    if (previewCandles.length > 0) {
+      if (lastProvisionalNoSignalOpenTime !== currentCandle.openTime) {
+        logSkip(
+          `${new Date(currentCandle.openTime).toISOString()} ${decision.reason}; provisional decision will re-check when official candle arrives`
+        );
+        lastProvisionalNoSignalOpenTime = currentCandle.openTime;
+      }
+      return;
+    }
+
     logSkip(`${new Date(currentCandle.openTime).toISOString()} ${decision.reason}`);
     lastHandledCandleOpenTime = currentCandle.openTime;
     return;

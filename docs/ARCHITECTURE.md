@@ -277,13 +277,15 @@ sleep pollMs
 
 Early entry targets the next contract while the current candle is still forming.
 
-The main loop checks stages in this order:
+The main loop checks these configured stages:
 
 1. Primary stage at `earlyEntryPrimarySecondsBeforeClose`.
 2. Secondary stage at `earlyEntrySecondarySecondsBeforeClose`.
 3. Final stage at `earlyEntryOrderSecondsBeforeClose`.
 
 Primary and secondary stages require a minimum move percentage. The final stage only requires that the forming candle has the correct color for the setup.
+
+If more than one stage is already due on a poll, the most urgent due stage runs first. This means a late poll at the final check uses the color-only final rule instead of first attempting older threshold stages.
 
 When one stage successfully opens a trade for the next candle, later stages for that same target candle are marked as done.
 

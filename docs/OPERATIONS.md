@@ -131,6 +131,8 @@ The no-trade window blocks new entries only. The bot still manages already-open 
 
 Early-entry orders opened at the primary or secondary checks are validated again at the final check. If the forming candle has changed so the setup no longer matches the pending trade, the bot cancels the pending order when it is not already fully filled.
 
+If a polling cycle reaches a later early-entry stage without having run an earlier one, the bot uses the later stage. A tick at the final one-second check therefore uses the color-only final rule.
+
 On startup, the candle already in progress is skipped for entries. When it closes, the bot logs the resolved open, close, and color before adding it to trend state.
 
 ## Google Sheets Logging
