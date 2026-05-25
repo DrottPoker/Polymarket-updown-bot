@@ -393,8 +393,11 @@ export function logCandleDecision(
 export function logCandleCorrection(previous: Candle, corrected: Candle): void {
   console.log("");
   console.log("[CANDLE_CORRECTION]");
+  console.log(`applies to: ${toIso(corrected.openTime)}`);
   console.log(`previous: ${formatCandle(previous)}`);
   console.log(`corrected: ${formatCandle(corrected)}`);
+  console.log(`color: ${previous.color === corrected.color ? corrected.color : `${previous.color} -> ${corrected.color}`}`);
+  console.log("note: official Gamma data can arrive after newer provisional candles");
 }
 
 export function logSignal(trade: PaperTrade, tradeWindowSeconds: number): void {
