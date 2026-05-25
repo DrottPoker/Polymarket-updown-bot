@@ -1,0 +1,19 @@
+{
+  "name": "base three green candles gives DOWN",
+  "description": "After three closed green trend candles, the next candle should receive a BASE DOWN signal.",
+  "seedCandles": [
+    { "index": 1, "open": 100, "close": 101 },
+    { "index": 2, "open": 101, "close": 102 },
+    { "index": 3, "open": 102, "close": 103 }
+  ],
+  "actions": [
+    {
+      "type": "expectSignal",
+      "expected": {
+        "kind": "BASE",
+        "direction": "DOWN",
+        "reasonIncludes": "previous 3 trend candles were green"
+      }
+    }
+  ]
+}

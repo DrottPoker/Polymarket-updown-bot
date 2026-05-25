@@ -32,11 +32,17 @@ src/
   polymarket/
     marketDiscovery.ts
     liveExecutor.ts
+  scripts/
+    clearGoogleSheets.ts
+    strategyReplay.ts
   trading/
+    earlyEntryStages.ts
     strategy.ts
     paperBroker.ts
     riskManager.ts
   index.ts
+fixtures/
+  strategy/
 ```
 
 ## Module Responsibilities
@@ -80,6 +86,14 @@ Shared domain types used across the codebase:
 - Resolved trades.
 - Live order metadata.
 - Execution mode and price source types.
+
+### `src/scripts/strategyReplay.ts`
+
+Runs deterministic replay fixtures from `fixtures/strategy`.
+
+It is an offline regression tool for signal timing. It creates a test config, feeds fixture candles into `TradingViewReversalStrategy`, checks expected base/retry/early-entry signals, and prints recent candle context when a fixture fails.
+
+It also exercises the shared early-entry stage selector so late-poll behavior can be tested without starting the bot.
 
 ### `src/marketData/candles.ts`
 
@@ -148,6 +162,12 @@ It handles:
 - Strategy counters used for internal behavior.
 
 It does not know about Polymarket APIs, order books, wallets, CSV files, or PM2.
+
+### `src/trading/earlyEntryStages.ts`
+
+Pure helper module for early-entry stage definitions and stage selection.
+
+The runtime loop and replay fixtures both use this module so delayed-poll behavior is tested against the same selector used by live execution.
 
 ### `src/trading/paperBroker.ts`
 

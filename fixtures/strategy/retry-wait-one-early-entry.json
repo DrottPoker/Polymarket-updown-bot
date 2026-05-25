@@ -1,0 +1,33 @@
+{
+  "name": "retry wait one early entry",
+  "description": "After a DOWN loss on a green candle, one continued green forming candle should arm a RETRY DOWN early entry.",
+  "config": {
+    "useLossRetryLogic": true,
+    "retryWaitCandles": 1
+  },
+  "actions": [
+    {
+      "type": "recordTrade",
+      "signal": {
+        "kind": "BASE",
+        "direction": "DOWN",
+        "reason": "fixture base down"
+      },
+      "candle": { "index": 1, "open": 100, "close": 101 },
+      "result": "LOSS"
+    },
+    {
+      "type": "expectEarlySignal",
+      "formingCandle": { "index": 2, "open": 101, "close": 102 },
+      "check": {
+        "label": "fixture final early entry",
+        "minMovePct": null
+      },
+      "expected": {
+        "kind": "RETRY",
+        "direction": "DOWN",
+        "reasonIncludes": "retry setup"
+      }
+    }
+  ]
+}

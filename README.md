@@ -55,8 +55,11 @@ src/
   logging/      Console, optional CSV, and Google Sheets output
   marketData/   Binance and Polymarket/Chainlink candle sources
   polymarket/   Gamma market discovery and CLOB live execution
+  scripts/      Operational and replay scripts
   trading/      Strategy, simulated trades, and runtime risk checks
   index.ts      Main polling loop and trade lifecycle
+fixtures/
+  strategy/     Deterministic replay fixtures for strategy timing
 ```
 
 ## Documentation
@@ -159,6 +162,24 @@ For BASE setups, a third green trend candle places `DOWN` on the next contract; 
 
 If a primary or secondary early-entry order is already pending, the final check still runs at `earlyEntryOrderSecondsBeforeClose`. If the forming candle no longer produces the same setup and direction, the bot cancels the pending order when it is not already fully filled.
 
+## Strategy Replay Tests
+
+Replay fixtures live in `fixtures/strategy`. They feed deterministic candle sequences into the strategy and early-entry stage selector without touching Polymarket, Google Sheets, local CSV files, or live order code.
+
+Run all fixtures:
+
+```bash
+npm run test:strategy
+```
+
+Run one fixture:
+
+```bash
+npm run replay:fixture -- fixtures/strategy/base-three-red-up.json
+```
+
+Use these tests when changing 3-candle logic, doji behavior, retry behavior, early-entry timing, startup handling, or provisional/official candle behavior.
+
 ## No-Trade Window
 
 Set `noTradeWindowEnabled=true` to block new entries during a configured local-time window. The default window is `23:00` to `07:00` in `Europe/Stockholm`.
@@ -229,6 +250,8 @@ npm run dev
 npm run dry-run
 npm run dry-run:once
 npm run live
+npm run test:strategy
+npm run replay:fixture -- fixtures/strategy/base-three-red-up.json
 npm run typecheck
 npm run build
 ```

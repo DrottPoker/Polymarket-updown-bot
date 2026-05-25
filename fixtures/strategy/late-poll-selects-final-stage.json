@@ -1,0 +1,13 @@
+{
+  "name": "late poll selects final early-entry stage",
+  "description": "If the bot first polls at the final one-second window, it should run the final color-only rule and mark older stages as attempted.",
+  "actions": [
+    {
+      "type": "expectDueEarlyStage",
+      "secondsLeft": 1,
+      "attemptedStages": [],
+      "expectedStage": "final",
+      "expectedAttemptedAfter": ["primary", "secondary", "final"]
+    }
+  ]
+}

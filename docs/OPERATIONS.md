@@ -190,6 +190,22 @@ npm run sheets:clear:help
 
 This clears the configured `Trades` and `Order Events` tabs back to their header rows and rebuilds the configured `Stats` tab from that blank trade log. It does not delete or edit local `trades.csv` or `stats.csv`.
 
+## Strategy Replay Tests
+
+Run deterministic strategy fixtures before changing signal timing, doji handling, retry logic, early-entry logic, or provisional/official candle handling:
+
+```bash
+npm run test:strategy
+```
+
+Run a single fixture:
+
+```bash
+npm run replay:fixture -- fixtures/strategy/provisional-preview-third-red.json
+```
+
+The replay runner is offline and does not place orders. It uses fixture candles from `fixtures/strategy`, feeds them into `TradingViewReversalStrategy`, and fails with recent candle context when the actual signal does not match the expected signal.
+
 ## Dry Run
 
 Run a single preflight cycle:

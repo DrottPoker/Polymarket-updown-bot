@@ -1,0 +1,18 @@
+{
+  "name": "doji ignored does not complete trend chain",
+  "description": "When doji candles are ignored, red doji red only provides two usable trend candles.",
+  "config": {
+    "ignoreDojiInTrend": true
+  },
+  "seedCandles": [
+    { "index": 1, "open": 100, "close": 99 },
+    { "index": 2, "open": 99, "close": 99 },
+    { "index": 3, "open": 99, "close": 98 }
+  ],
+  "actions": [
+    {
+      "type": "expectSignal",
+      "expected": null
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "doji counted inherits previous trend",
+  "description": "When doji candles are counted, a doji between red candles inherits red and can complete the 3-candle chain.",
+  "config": {
+    "ignoreDojiInTrend": false
+  },
+  "seedCandles": [
+    { "index": 1, "open": 100, "close": 99 },
+    { "index": 2, "open": 99, "close": 99 },
+    { "index": 3, "open": 99, "close": 98 }
+  ],
+  "actions": [
+    {
+      "type": "expectSignal",
+      "expected": {
+        "kind": "BASE",
+        "direction": "UP"
+      }
+    }
+  ]
+}

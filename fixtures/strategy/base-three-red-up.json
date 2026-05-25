@@ -1,0 +1,19 @@
+{
+  "name": "base three red candles gives UP",
+  "description": "After three closed red trend candles, the next candle should receive a BASE UP signal.",
+  "seedCandles": [
+    { "index": 1, "open": 100, "close": 99 },
+    { "index": 2, "open": 99, "close": 98 },
+    { "index": 3, "open": 98, "close": 97 }
+  ],
+  "actions": [
+    {
+      "type": "expectSignal",
+      "expected": {
+        "kind": "BASE",
+        "direction": "UP",
+        "reasonIncludes": "previous 3 trend candles were red"
+      }
+    }
+  ]
+}

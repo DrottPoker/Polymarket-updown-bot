@@ -21,6 +21,11 @@ import { closePolymarketChainlinkCandleSources } from "./marketData/polymarketCh
 import { PolymarketLiveExecutor } from "./polymarket/liveExecutor";
 import { createPaperTrade, resizeTradeToLiveFill, resolvePaperTrade } from "./trading/paperBroker";
 import { RuntimeRiskManager } from "./trading/riskManager";
+import {
+  getEarlyEntryStages as buildEarlyEntryStages,
+  markDueEarlyEntryStagesAttempted,
+  selectDueEarlyEntryStage,
+} from "./trading/earlyEntryStages";
 import { TradingViewReversalStrategy } from "./trading/strategy";
 
 const config = loadConfig();
@@ -52,13 +57,6 @@ let lastPendingTradeSkipOpenTime = 0;
 let lastProvisionalNoSignalOpenTime = 0;
 let shuttingDown = false;
 
-type EarlyEntryStage = {
-  name: string;
-  label: string;
-  secondsBeforeClose: number;
-  minMovePct: number | null;
-};
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -71,27 +69,8 @@ function secondsUntilCandleClose(candle: Candle, now: number): number {
   return Math.max(0, Math.ceil((candle.closeTime - now) / 1000));
 }
 
-function getEarlyEntryStages(): EarlyEntryStage[] {
-  return [
-    {
-      name: "primary",
-      label: "primary early entry",
-      secondsBeforeClose: config.earlyEntryPrimarySecondsBeforeClose,
-      minMovePct: config.earlyEntryPrimaryMinMovePct,
-    },
-    {
-      name: "secondary",
-      label: "secondary early entry",
-      secondsBeforeClose: config.earlyEntrySecondarySecondsBeforeClose,
-      minMovePct: config.earlyEntrySecondaryMinMovePct,
-    },
-    {
-      name: "final",
-      label: "final early entry",
-      secondsBeforeClose: config.earlyEntryOrderSecondsBeforeClose,
-      minMovePct: null,
-    },
-  ];
+function getEarlyEntryStages() {
+  return buildEarlyEntryStages(config);
 }
 
 function resetEarlyEntryAttemptsForTarget(targetOpenTime: number): void {
@@ -107,25 +86,6 @@ function markEarlyEntryTargetDone(targetOpenTime: number): void {
   resetEarlyEntryAttemptsForTarget(targetOpenTime);
   for (const stage of getEarlyEntryStages()) {
     earlyEntryAttemptedStages.add(stage.name);
-  }
-}
-
-function getDueEarlyEntryStage(secondsLeft: number): EarlyEntryStage | null {
-  const dueStages = getEarlyEntryStages()
-    .filter(
-      (earlyEntryStage) =>
-        secondsLeft <= earlyEntryStage.secondsBeforeClose && !earlyEntryAttemptedStages.has(earlyEntryStage.name)
-    )
-    .sort((a, b) => a.secondsBeforeClose - b.secondsBeforeClose);
-
-  return dueStages[0] ?? null;
-}
-
-function markDueEarlyEntryStagesAttempted(selectedStage: EarlyEntryStage): void {
-  for (const stage of getEarlyEntryStages()) {
-    if (stage.secondsBeforeClose >= selectedStage.secondsBeforeClose) {
-      earlyEntryAttemptedStages.add(stage.name);
-    }
   }
 }
 
@@ -536,12 +496,13 @@ async function maybeOpenEarlyEntry(
   resetEarlyEntryAttemptsForTarget(nextCandle.openTime);
 
   const secondsLeft = secondsUntilCandleClose(currentCandle, now);
-  const stage = getDueEarlyEntryStage(secondsLeft);
+  const stages = getEarlyEntryStages();
+  const stage = selectDueEarlyEntryStage(stages, earlyEntryAttemptedStages, secondsLeft);
   if (!stage) {
     return;
   }
 
-  markDueEarlyEntryStagesAttempted(stage);
+  markDueEarlyEntryStagesAttempted(stages, earlyEntryAttemptedStages, stage);
 
   const decision = decisionStrategy.getEarlySignalForNextCandle(currentCandle, {
     label: stage.label,
