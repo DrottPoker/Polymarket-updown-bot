@@ -211,7 +211,7 @@ Closed trade results are resolved from official Gamma metadata only. The bot use
 
 Warmup uses the newest contiguous closed candles available from Gamma metadata. A missing older historical candle reduces warmup depth, but it does not block startup as long as enough recent candles exist for the strategy.
 
-If the newest closed candle is not official yet, the bot keeps the latest available historical sequence and builds a temporary decision-only strategy preview from live provisional candles. Entry decisions can use that preview so the bot still sees the latest trend chain while Gamma is delayed. Result settlement and permanent strategy state updates still wait for official Gamma data.
+If the newest closed candle is not official yet, the bot keeps the latest available historical sequence and waits before making new entry decisions. This keeps the 3-candle chain based on official Polymarket history. Only the current forming candle can use live RTDS data for early entry.
 
 When the process starts in the middle of a candle, the first RTDS tick is not treated as the official candle open. The bot corrects the live candle open from Gamma `priceToBeat` or the previous official close when available, then uses RTDS updates for the live close.
 

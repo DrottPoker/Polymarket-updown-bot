@@ -54,7 +54,6 @@ let startupSkippedCandleOpenTime: number | null = null;
 let lastInsufficientCandlesLogTime = 0;
 let lastOfficialClosedCandleWaitLogTime = 0;
 let lastPendingTradeSkipOpenTime = 0;
-let lastProvisionalNoSignalOpenTime = 0;
 let shuttingDown = false;
 
 function sleep(ms: number): Promise<void> {
@@ -107,30 +106,8 @@ function isOfficialSettlementCandle(candle: Candle): boolean {
   return candle.settlement !== "provisional";
 }
 
-function getUnprocessedDecisionPreviewCandles(closedCandles: Candle[]): Candle[] {
-  return closedCandles
-    .filter((candle) => candle.openTime > lastProcessedClosedCandleOpenTime)
-    .sort((a, b) => a.openTime - b.openTime);
-}
-
-function buildDecisionStrategy(previewCandles: Candle[]): TradingViewReversalStrategy {
-  if (previewCandles.length === 0) {
-    return strategy;
-  }
-
-  const decisionStrategy = strategy.clone();
-  for (const candle of previewCandles) {
-    decisionStrategy.processClosedCandleWithoutTrade(candle);
-  }
-
-  return decisionStrategy;
-}
-
-function hasClosedCandleForDecision(requiredOpenTime: number, previewCandles: Candle[]): boolean {
-  return (
-    lastProcessedClosedCandleOpenTime >= requiredOpenTime ||
-    previewCandles.some((candle) => candle.openTime === requiredOpenTime)
-  );
+function hasOfficialClosedCandleForDecision(requiredOpenTime: number): boolean {
+  return lastProcessedClosedCandleOpenTime >= requiredOpenTime;
 }
 
 function logInsufficientCandles(candleCount: number, now: number): void {
@@ -142,17 +119,13 @@ function logInsufficientCandles(candleCount: number, now: number): void {
   logSkip(`Waiting for at least 4 Polymarket candles; received ${candleCount}`);
 }
 
-function logWaitingForOfficialClosedCandle(openTime: number, now: number, previewCandles: Candle[]): void {
+function logWaitingForOfficialClosedCandle(openTime: number, now: number): void {
   if (now - lastOfficialClosedCandleWaitLogTime < 30_000) {
     return;
   }
 
   lastOfficialClosedCandleWaitLogTime = now;
-  const previewDetail =
-    previewCandles.length > 0
-      ? `; using ${previewCandles.length} provisional candle(s) for entry decisions only`
-      : "";
-  logSkip(`${new Date(openTime).toISOString()} waiting for official Polymarket closed candle${previewDetail}`);
+  logSkip(`${new Date(openTime).toISOString()} waiting for official Polymarket closed candle before entry decision`);
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
@@ -679,18 +652,15 @@ async function tick(): Promise<void> {
 
   await cancelPendingLiveOrderIfDue(now);
 
-  const previewCandles = getUnprocessedDecisionPreviewCandles(closedCandles);
-  const decisionStrategy = buildDecisionStrategy(previewCandles);
-
-  await maybeValidatePendingEarlyEntry(currentCandle, now, decisionStrategy);
-  await maybeOpenEarlyEntry(currentCandle, now, decisionStrategy);
-
-  if (currentCandle.openTime === lastHandledCandleOpenTime) {
+  if (!hasOfficialClosedCandleForDecision(requiredPreviousClosedOpenTime)) {
+    logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now);
     return;
   }
 
-  if (!hasClosedCandleForDecision(requiredPreviousClosedOpenTime, previewCandles)) {
-    logWaitingForOfficialClosedCandle(requiredPreviousClosedOpenTime, now, previewCandles);
+  await maybeValidatePendingEarlyEntry(currentCandle, now, strategy);
+  await maybeOpenEarlyEntry(currentCandle, now, strategy);
+
+  if (currentCandle.openTime === lastHandledCandleOpenTime) {
     return;
   }
 
@@ -711,18 +681,8 @@ async function tick(): Promise<void> {
     return;
   }
 
-  const decision = decisionStrategy.getSignalForNextCandle();
+  const decision = strategy.getSignalForNextCandle();
   if (!decision.signal) {
-    if (previewCandles.length > 0) {
-      if (lastProvisionalNoSignalOpenTime !== currentCandle.openTime) {
-        logSkip(
-          `${new Date(currentCandle.openTime).toISOString()} ${decision.reason}; provisional decision will re-check when official candle arrives`
-        );
-        lastProvisionalNoSignalOpenTime = currentCandle.openTime;
-      }
-      return;
-    }
-
     logSkip(`${new Date(currentCandle.openTime).toISOString()} ${decision.reason}`);
     lastHandledCandleOpenTime = currentCandle.openTime;
     return;

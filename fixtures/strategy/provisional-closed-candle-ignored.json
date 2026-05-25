@@ -1,0 +1,21 @@
+{
+  "name": "provisional closed candle ignored for entry chain",
+  "description": "A closed RTDS/provisional candle must not complete a 3-candle chain because it can disagree with official Polymarket settlement.",
+  "seedCandles": [
+    { "index": 1, "open": 100, "close": 99 }
+  ],
+  "actions": [
+    {
+      "type": "expectEarlySignal",
+      "previewCandles": [
+        { "index": 2, "open": 99, "close": 98, "settlement": "provisional" }
+      ],
+      "formingCandle": { "index": 3, "open": 98, "close": 97 },
+      "check": {
+        "label": "fixture final early entry",
+        "minMovePct": null
+      },
+      "expected": null
+    }
+  ]
+}

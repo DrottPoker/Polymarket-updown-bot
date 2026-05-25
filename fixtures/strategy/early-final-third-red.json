@@ -1,15 +1,13 @@
 {
-  "name": "provisional preview can complete third red setup",
-  "description": "When Gamma is delayed, a provisional closed candle can be used in a decision-only preview before a final early entry.",
+  "name": "early final third red setup",
+  "description": "With two official red candles in history, a red forming candle should create a final BASE UP early entry.",
   "seedCandles": [
-    { "index": 1, "open": 100, "close": 99 }
+    { "index": 1, "open": 100, "close": 99 },
+    { "index": 2, "open": 99, "close": 98 }
   ],
   "actions": [
     {
       "type": "expectEarlySignal",
-      "previewCandles": [
-        { "index": 2, "open": 99, "close": 98, "settlement": "provisional" }
-      ],
       "formingCandle": { "index": 3, "open": 98, "close": 97 },
       "check": {
         "label": "fixture final early entry",

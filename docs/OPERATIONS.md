@@ -119,7 +119,7 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 `priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
 
-Closed trade candles are settled from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. It does not resolve closed trades from live RTDS ticks. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence and builds a temporary decision-only strategy preview from live provisional candles. Entry decisions can use that preview so the bot still sees the latest trend chain while Gamma is delayed. Result settlement and permanent strategy state updates still wait for official Gamma data.
+Closed trade candles are settled from official Gamma metadata only. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. It does not resolve closed trades from live RTDS ticks. If the newest closed candle is not official yet, the bot keeps the latest available historical sequence and waits before making new entry decisions. This keeps the 3-candle chain based on official Polymarket history. Only the current forming candle can use live RTDS data for early entry.
 
 `liveFullFillToleranceShares` treats tiny CLOB dust differences as full fills. With the default `0.01`, a 6-share order filled as `5.9936` is logged as a full 6-share fill.
 
@@ -201,7 +201,7 @@ npm run test:strategy
 Run a single fixture:
 
 ```bash
-npm run replay:fixture -- fixtures/strategy/provisional-preview-third-red.json
+npm run replay:fixture -- fixtures/strategy/provisional-closed-candle-ignored.json
 ```
 
 The replay runner is offline and does not place orders. It uses fixture candles from `fixtures/strategy`, feeds them into `TradingViewReversalStrategy`, and fails with recent candle context when the actual signal does not match the expected signal.
