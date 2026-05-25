@@ -84,6 +84,8 @@ type StatsBucket = {
   entryCents: number;
 };
 
+const sectionWidth = 78;
+
 function toIso(ms: number): string {
   return new Date(ms).toISOString();
 }
@@ -110,6 +112,24 @@ function formatDecision(decision: StrategyDecision): string {
   }
 
   return `SIGNAL ${decision.signal.kind} ${decision.signal.direction} - ${decision.signal.reason}`;
+}
+
+function formatSectionHeader(title: string): string {
+  const label = `[${title}]`;
+  const prefix = "========== ";
+  const usedLength = prefix.length + label.length + 1;
+  const suffixLength = Math.max(10, sectionWidth - usedLength);
+  return `${prefix}${label} ${"=".repeat(suffixLength)}`;
+}
+
+function logSection(title: string): void {
+  console.log("");
+  console.log(formatSectionHeader(title));
+}
+
+function logErrorSection(title: string): void {
+  console.error("");
+  console.error(formatSectionHeader(title));
 }
 
 function csvEscape(value: string | number | boolean | null | undefined): string {
@@ -309,7 +329,7 @@ export function ensureCsvLog(logFile: string): void {
 }
 
 export function logStartup(config: AppConfig): void {
-  console.log("[START]");
+  logSection("START");
   console.log(`execution mode: ${config.executionMode}`);
   console.log(`price source: ${config.priceSource}`);
   console.log(`symbol: ${config.symbol}`);
@@ -361,14 +381,12 @@ export function logStartup(config: AppConfig): void {
 }
 
 export function logWarmup(closedCandles: number): void {
-  console.log("");
-  console.log("[WARMUP]");
+  logSection("WARMUP");
   console.log(`processed closed candles: ${closedCandles}`);
 }
 
 export function logRecentClosedCandles(candles: Candle[], trendColors: TrendColor[]): void {
-  console.log("");
-  console.log("[CANDLES]");
+  logSection("CANDLES");
   console.log("latest closed candles:");
   for (const candle of candles) {
     console.log(`  - ${formatCandle(candle)}`);
@@ -382,8 +400,7 @@ export function logCandleDecision(
   decision: StrategyDecision,
   targetOpenTime: number
 ): void {
-  console.log("");
-  console.log("[CANDLE]");
+  logSection("CANDLE");
   console.log(`closed: ${formatCandle(closedCandle)}`);
   console.log(`last ${trendColors.length} trend colors (oldest -> newest): ${formatTrendColors(trendColors)}`);
   console.log(`next target: ${toIso(targetOpenTime)}`);
@@ -391,8 +408,7 @@ export function logCandleDecision(
 }
 
 export function logCandleCorrection(previous: Candle, corrected: Candle): void {
-  console.log("");
-  console.log("[CANDLE_CORRECTION]");
+  logSection("CANDLE_CORRECTION");
   console.log(`applies to: ${toIso(corrected.openTime)}`);
   console.log(`previous: ${formatCandle(previous)}`);
   console.log(`corrected: ${formatCandle(corrected)}`);
@@ -401,8 +417,7 @@ export function logCandleCorrection(previous: Candle, corrected: Candle): void {
 }
 
 export function logSignal(trade: PaperTrade, tradeWindowSeconds: number): void {
-  console.log("");
-  console.log("[SIGNAL]");
+  logSection("SIGNAL");
   console.log(`time: ${toIso(trade.signalTime)}`);
   console.log(`type: ${trade.kind}`);
   console.log(`direction: ${trade.direction}`);
@@ -414,8 +429,7 @@ export function logSignal(trade: PaperTrade, tradeWindowSeconds: number): void {
 }
 
 export function logResult(trade: ResolvedPaperTrade): void {
-  console.log("");
-  console.log("[RESULT]");
+  logSection("RESULT");
   console.log(`time: ${toIso(trade.candleOpenTime)}`);
   console.log(`type: ${trade.kind}`);
   console.log(`direction: ${trade.direction}`);
@@ -426,8 +440,7 @@ export function logResult(trade: ResolvedPaperTrade): void {
 }
 
 export function logLiveOrder(order: LiveOrder): void {
-  console.log("");
-  console.log("[LIVE_ORDER]");
+  logSection("LIVE_ORDER");
   console.log(`market: ${order.marketSlug}`);
   console.log(`outcome: ${order.outcome}`);
   console.log(`token: ${order.tokenId}`);
@@ -443,8 +456,7 @@ export function logLiveOrder(order: LiveOrder): void {
 }
 
 export function logLiveDryRun(order: LiveOrder): void {
-  console.log("");
-  console.log("[LIVE_DRY_RUN]");
+  logSection("LIVE_DRY_RUN");
   console.log("no order was posted");
   console.log(`market: ${order.marketSlug}`);
   console.log(`outcome: ${order.outcome}`);
@@ -459,8 +471,7 @@ export function logLiveDryRun(order: LiveOrder): void {
 }
 
 export function logLiveCancel(order: LiveOrder): void {
-  console.log("");
-  console.log("[LIVE_CANCEL]");
+  logSection("LIVE_CANCEL");
   console.log(`market: ${order.marketSlug}`);
   console.log(`order id: ${order.orderId ?? "unknown"}`);
   console.log(`filled: ${order.filled}`);
@@ -470,8 +481,7 @@ export function logLiveCancel(order: LiveOrder): void {
 }
 
 export function logLiveFill(order: LiveOrder): void {
-  console.log("");
-  console.log("[LIVE_FILL]");
+  logSection("LIVE_FILL");
   console.log(`market: ${order.marketSlug}`);
   console.log(`order id: ${order.orderId ?? "unknown"}`);
   console.log(`price: ${order.price.toFixed(4)}`);
@@ -480,15 +490,13 @@ export function logLiveFill(order: LiveOrder): void {
 }
 
 export function logSkip(message: string): void {
-  console.log("");
-  console.log("[SKIP]");
+  logSection("SKIP");
   console.log(message);
 }
 
 export function logError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  console.error("");
-  console.error("[ERROR]");
+  logErrorSection("ERROR");
   console.error(message);
 }
 
