@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { AppConfig } from "../config/appConfig";
-import { LiveOrder, PaperTrade } from "../domain/types";
+import { LiveOrder, OrderEventType, PaperTrade } from "../domain/types";
 import { RuntimeRiskSnapshot } from "../trading/riskManager";
 
 export type PendingLiveTradeState = {
@@ -11,11 +11,20 @@ export type PendingLiveTradeState = {
   earlyEntryFinalValidationDone: boolean;
 };
 
+export type PendingSettlementState = {
+  trade: PaperTrade;
+  realizedLiveOrder: LiveOrder | null;
+  shouldLogTrade: boolean;
+  orderEventType?: OrderEventType;
+  orderEventDetail?: string;
+};
+
 export type RuntimeState = {
   version: 1;
   updatedAt: string;
   risk: RuntimeRiskSnapshot | null;
   pendingLiveTrade: PendingLiveTradeState | null;
+  pendingSettlements: PendingSettlementState[];
 };
 
 const emptyState = (): RuntimeState => ({
@@ -23,6 +32,7 @@ const emptyState = (): RuntimeState => ({
   updatedAt: new Date().toISOString(),
   risk: null,
   pendingLiveTrade: null,
+  pendingSettlements: [],
 });
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -40,6 +50,9 @@ function normalizeRuntimeState(value: unknown): RuntimeState {
     updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : new Date().toISOString(),
     risk: isObject(state.risk) ? (state.risk as RuntimeRiskSnapshot) : null,
     pendingLiveTrade: isObject(state.pendingLiveTrade) ? (state.pendingLiveTrade as PendingLiveTradeState) : null,
+    pendingSettlements: Array.isArray(state.pendingSettlements)
+      ? (state.pendingSettlements as PendingSettlementState[])
+      : [],
   };
 }
 

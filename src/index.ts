@@ -24,7 +24,7 @@ import { GoogleSheetsLogger } from "./logging/googleSheetsLogger";
 import { fetchCandles } from "./marketData/candles";
 import { closePolymarketChainlinkCandleSources } from "./marketData/polymarketChainlinkCandles";
 import { PolymarketLiveExecutor } from "./polymarket/liveExecutor";
-import { PendingLiveTradeState, RuntimeState, RuntimeStateStore } from "./state/runtimeStateStore";
+import { PendingLiveTradeState, PendingSettlementState, RuntimeState, RuntimeStateStore } from "./state/runtimeStateStore";
 import { createPaperTrade, resizeTradeToLiveFill, resolvePaperTrade } from "./trading/paperBroker";
 import { RuntimeRiskManager } from "./trading/riskManager";
 import {
@@ -63,8 +63,12 @@ let lastInsufficientCandlesLogTime = 0;
 let lastClosedCandleDataWaitOpenTime = 0;
 let lastPendingTradeSkipOpenTime = 0;
 let lastDecisionLogTargetOpenTime = 0;
+let lastOfficialSettlementWaitOpenTime = 0;
 const processedClosedCandlesByOpenTime = new Map<number, Candle>();
 const processedTradeInputsByOpenTime = new Map<number, PaperTrade>();
+const pendingSettlementsByOpenTime = new Map<number, PendingSettlementState>(
+  runtimeState.pendingSettlements.map((settlement) => [settlement.trade.candleOpenTime, settlement])
+);
 const historicalWarmupOpenTimes = new Set<number>();
 let googleSheetsQueue: Promise<void> = Promise.resolve();
 let shuttingDown = false;
@@ -92,6 +96,7 @@ function persistRuntimeState(): void {
     updatedAt: new Date().toISOString(),
     risk: riskManager.getSnapshot(),
     pendingLiveTrade: currentPendingLiveTradeState(),
+    pendingSettlements: Array.from(pendingSettlementsByOpenTime.values()),
   };
   runtimeStateStore.save(runtimeState);
 }
@@ -111,6 +116,7 @@ function clearPersistedPendingLiveTradeState(): void {
     ...runtimeState,
     risk: riskManager.getSnapshot(),
     pendingLiveTrade: null,
+    pendingSettlements: Array.from(pendingSettlementsByOpenTime.values()),
   };
   runtimeStateStore.save(runtimeState);
 }
@@ -302,8 +308,30 @@ function shouldWaitForOfficialSettlement(candle: Candle): boolean {
   return config.priceSource === "polymarket_chainlink" && candle.settlement === "provisional";
 }
 
+function logWaitingForOfficialSettlement(openTime: number, reason: string): void {
+  if (lastOfficialSettlementWaitOpenTime === openTime) {
+    return;
+  }
+
+  lastOfficialSettlementWaitOpenTime = openTime;
+  logSkip(`${new Date(openTime).toISOString()} waiting for official settlement before ${reason}`);
+}
+
 function rememberProcessedClosedCandle(candle: Candle): void {
   processedClosedCandlesByOpenTime.set(candle.openTime, candle);
+}
+
+function moveActivePendingTradeToSettlement(settlement: PendingSettlementState): void {
+  pendingSettlementsByOpenTime.set(settlement.trade.candleOpenTime, settlement);
+  pendingTrade = null;
+  pendingLiveOrder = null;
+  clearPendingEarlyEntryTracking();
+  clearPersistedPendingLiveTradeState();
+}
+
+function clearPendingSettlement(openTime: number): void {
+  pendingSettlementsByOpenTime.delete(openTime);
+  persistRuntimeState();
 }
 
 function rebuildStrategyFromProcessedHistory(): void {
@@ -342,6 +370,48 @@ function processOfficialClosedCandleCorrections(closedCandles: Candle[]): void {
     rememberProcessedClosedCandle(candle);
     rebuildStrategyFromProcessedHistory();
     logCandleCorrection(previous, candle);
+  }
+}
+
+function finalizePendingSettlement(candle: Candle, settlement: PendingSettlementState): void {
+  if (settlement.shouldLogTrade) {
+    const tradeForLog = settlement.realizedLiveOrder
+      ? resizeTradeToLiveFill(settlement.trade, settlement.realizedLiveOrder)
+      : settlement.trade;
+    const resolvedTrade = resolvePaperTrade(tradeForLog, candle);
+    logResult(resolvedTrade);
+    writeLocalTradeLogs(resolvedTrade, settlement.realizedLiveOrder);
+    syncGoogleSheetsTrade(resolvedTrade, settlement.realizedLiveOrder);
+    if (settlement.orderEventType) {
+      syncGoogleSheetsOrderEvent(
+        settlement.orderEventType,
+        settlement.trade,
+        settlement.realizedLiveOrder,
+        settlement.orderEventDetail
+      );
+    }
+    riskManager.recordResolvedTrade(resolvedTrade);
+  }
+
+  clearPendingSettlement(candle.openTime);
+}
+
+function settleProcessedOfficialSettlements(closedCandles: Candle[]): void {
+  for (const candle of closedCandles) {
+    if (candle.settlement === "provisional") {
+      continue;
+    }
+
+    if (candle.openTime > lastProcessedClosedCandleOpenTime) {
+      continue;
+    }
+
+    const settlement = pendingSettlementsByOpenTime.get(candle.openTime);
+    if (!settlement) {
+      continue;
+    }
+
+    finalizePendingSettlement(candle, settlement);
   }
 }
 
@@ -636,6 +706,15 @@ function writeLocalTradeLogs(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | 
   refreshStatsLog(config.logFile, config.statsFile);
 }
 
+function earliestPendingStateOpenTime(): number | null {
+  const openTimes = [
+    pendingTrade?.candleOpenTime,
+    ...Array.from(pendingSettlementsByOpenTime.values()).map((settlement) => settlement.trade.candleOpenTime),
+  ].filter((openTime): openTime is number => typeof openTime === "number");
+
+  return openTimes.length > 0 ? Math.min(...openTimes) : null;
+}
+
 async function recoverPersistedPendingLiveTrade(): Promise<void> {
   const pendingState = runtimeState.pendingLiveTrade;
   if (!pendingState) {
@@ -768,16 +847,22 @@ function finishProcessedClosedCandle(candle: Candle): void {
 
 async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
   processOfficialClosedCandleCorrections(closedCandles);
+  settleProcessedOfficialSettlements(closedCandles);
 
   const newClosedCandles = closedCandles.filter((candle) => candle.openTime > lastProcessedClosedCandleOpenTime);
 
   for (const candle of newClosedCandles) {
-    if (pendingStrategyOnlyTrade && pendingStrategyOnlyTrade.candleOpenTime === candle.openTime) {
-      if (shouldWaitForOfficialSettlement(candle)) {
-        logSkip(`${new Date(candle.openTime).toISOString()} waiting for official settlement before resolving strategy-only signal`);
-        return;
+    const pendingSettlement = pendingSettlementsByOpenTime.get(candle.openTime);
+    if (pendingSettlement) {
+      const strategyTrade = resolvePaperTrade(pendingSettlement.trade, candle);
+      strategy.recordTradeResult(strategyTrade, candle);
+      processedTradeInputsByOpenTime.set(candle.openTime, pendingSettlement.trade);
+      if (candle.settlement === "provisional") {
+        logWaitingForOfficialSettlement(candle.openTime, "writing final trade log");
+      } else {
+        finalizePendingSettlement(candle, pendingSettlement);
       }
-
+    } else if (pendingStrategyOnlyTrade && pendingStrategyOnlyTrade.candleOpenTime === candle.openTime) {
       const strategyOnlyTrade = resolvePaperTrade(pendingStrategyOnlyTrade, candle);
       logSkip(
         `${new Date(candle.openTime).toISOString()} no-trade window strategy-only signal resolved as hypothetical ${strategyOnlyTrade.result}`
@@ -786,9 +871,9 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       strategy.recordTradeResult(strategyOnlyTrade, candle);
       pendingStrategyOnlyTrade = null;
     } else if (pendingTrade && pendingTrade.candleOpenTime === candle.openTime) {
-      if (shouldWaitForOfficialSettlement(candle)) {
-        logSkip(`${new Date(candle.openTime).toISOString()} waiting for official settlement before resolving pending trade`);
-        return;
+      const deferOfficialSettlement = shouldWaitForOfficialSettlement(candle);
+      if (deferOfficialSettlement) {
+        logWaitingForOfficialSettlement(candle.openTime, "writing final trade log");
       }
 
       await refreshPendingLiveOrderFillStatus();
@@ -808,26 +893,44 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         const strategyOnlyTrade = resolvePaperTrade(pendingTrade, candle);
         if (hasPartialLiveFill(pendingLiveOrder)) {
           const realizedLiveOrder = liveOrderForFilledPortion(pendingLiveOrder);
-          const realizedTrade = resolvePaperTrade(resizeTradeToLiveFill(pendingTrade, realizedLiveOrder), candle);
-          logSkip(
-            `${new Date(candle.openTime).toISOString()} live order was partially filled${liveFillProgress(pendingLiveOrder)}; logging realized partial trade and updating strategy state as ${strategyOnlyTrade.result}`
-          );
-          logResult(realizedTrade);
-          writeLocalTradeLogs(realizedTrade, realizedLiveOrder);
-          syncGoogleSheetsTrade(realizedTrade, realizedLiveOrder);
-          syncGoogleSheetsOrderEvent(
-            "ORDER_NOT_FILLED",
-            pendingTrade,
-            pendingLiveOrder,
-            "Order was partially filled by candle close and logged proportionally"
-          );
+          if (deferOfficialSettlement) {
+            logSkip(
+              `${new Date(candle.openTime).toISOString()} live order was partially filled${liveFillProgress(
+                pendingLiveOrder
+              )}; strategy state updates as provisional ${strategyOnlyTrade.result} and final trade log is deferred`
+            );
+          } else {
+            const realizedTrade = resolvePaperTrade(resizeTradeToLiveFill(pendingTrade, realizedLiveOrder), candle);
+            logSkip(
+              `${new Date(candle.openTime).toISOString()} live order was partially filled${liveFillProgress(pendingLiveOrder)}; logging realized partial trade and updating strategy state as ${strategyOnlyTrade.result}`
+            );
+            logResult(realizedTrade);
+            writeLocalTradeLogs(realizedTrade, realizedLiveOrder);
+            syncGoogleSheetsTrade(realizedTrade, realizedLiveOrder);
+            syncGoogleSheetsOrderEvent(
+              "ORDER_NOT_FILLED",
+              pendingTrade,
+              pendingLiveOrder,
+              "Order was partially filled by candle close and logged proportionally"
+            );
+            riskManager.recordResolvedTrade(realizedTrade);
+          }
           strategy.recordTradeResult(strategyOnlyTrade, candle);
           processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);
-          riskManager.recordResolvedTrade(realizedTrade);
-          pendingTrade = null;
-          pendingLiveOrder = null;
-          clearPendingEarlyEntryTracking();
-          clearPersistedPendingLiveTradeState();
+          if (deferOfficialSettlement) {
+            moveActivePendingTradeToSettlement({
+              trade: pendingTrade,
+              realizedLiveOrder,
+              shouldLogTrade: true,
+              orderEventType: "ORDER_NOT_FILLED",
+              orderEventDetail: "Order was partially filled by candle close and logged proportionally after official settlement",
+            });
+          } else {
+            pendingTrade = null;
+            pendingLiveOrder = null;
+            clearPendingEarlyEntryTracking();
+            clearPersistedPendingLiveTradeState();
+          }
           finishProcessedClosedCandle(candle);
           continue;
         }
@@ -847,6 +950,25 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         pendingLiveOrder = null;
         clearPendingEarlyEntryTracking();
         clearPersistedPendingLiveTradeState();
+        finishProcessedClosedCandle(candle);
+        continue;
+      }
+
+      if (deferOfficialSettlement) {
+        const strategyTrade = resolvePaperTrade(pendingTrade, candle);
+        logSkip(
+          `${new Date(candle.openTime).toISOString()} trade result is provisional ${strategyTrade.result}; strategy state advances and final trade log is deferred`
+        );
+        strategy.recordTradeResult(strategyTrade, candle);
+        processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);
+        moveActivePendingTradeToSettlement({
+          trade: pendingTrade,
+          realizedLiveOrder: pendingLiveOrder,
+          shouldLogTrade: true,
+          orderEventType: liveExecutor && pendingLiveOrder ? "ORDER_FILLED" : undefined,
+          orderEventDetail:
+            liveExecutor && pendingLiveOrder ? "Order was fully filled and logged after official settlement" : undefined,
+        });
         finishProcessedClosedCandle(candle);
         continue;
       }
@@ -892,13 +1014,13 @@ async function tick(): Promise<void> {
   }
 
   if (!initialized) {
-    const pendingTradeForWarmup = pendingTrade;
-    const warmupCandles = pendingTradeForWarmup
-      ? closedCandles.filter((candle) => candle.openTime < pendingTradeForWarmup.candleOpenTime)
+    const earliestPendingOpenTime = earliestPendingStateOpenTime();
+    const warmupCandles = earliestPendingOpenTime
+      ? closedCandles.filter((candle) => candle.openTime < earliestPendingOpenTime)
       : closedCandles;
     warmUpStrategy(warmupCandles);
     skipStartupCandle(currentCandle);
-    if (pendingTrade) {
+    if (earliestPendingOpenTime) {
       await processNewClosedCandles(closedCandles);
     }
     return;
