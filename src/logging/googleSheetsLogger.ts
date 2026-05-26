@@ -13,6 +13,11 @@ import {
 
 type SheetValue = string | number | boolean;
 
+export type GoogleSheetsReconcileResult = {
+  tradesAppended: number;
+  orderEventsAppended: number;
+};
+
 type GoogleTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -64,6 +69,116 @@ function columnName(columnCount: number): string {
 
 function normalizeValues(values: Array<Array<string | number | boolean | null | undefined>>): SheetValue[][] {
   return values.map((row) => row.map((value) => (value === null || value === undefined ? "" : value)));
+}
+
+const numericColumns = new Set([
+  "entry_cents",
+  "stake_usd",
+  "shares",
+  "open",
+  "close",
+  "pnl",
+  "live_price",
+  "live_size",
+  "filled_size",
+  "missed_pnl",
+  "missed_close",
+]);
+const booleanColumns = new Set(["live_filled", "canceled"]);
+
+function parseSheetValue(column: string, value: string): SheetValue {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return "";
+  }
+
+  if (booleanColumns.has(column)) {
+    const normalized = trimmed.toLowerCase();
+    if (normalized === "true") {
+      return true;
+    }
+
+    if (normalized === "false") {
+      return false;
+    }
+  }
+
+  if (numericColumns.has(column)) {
+    const normalized = trimmed.replace(/[$,]/g, "");
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return value;
+}
+
+function csvRowsToSheetValues(rows: CsvRow[], columns: string[]): SheetValue[][] {
+  return rows.map((row) => columns.map((column) => parseSheetValue(column, row[column] ?? "")));
+}
+
+function rowHasValues(row: CsvRow, columns: string[]): boolean {
+  return columns.some((column) => (row[column] ?? "").trim().length > 0);
+}
+
+function keyPart(value: string | undefined): string {
+  return (value ?? "").trim();
+}
+
+function rowKey(parts: string[]): string {
+  return parts.join("\u001f");
+}
+
+function tradeRowKey(row: CsvRow): string {
+  const orderId = keyPart(row.order_id);
+  if (orderId) {
+    return rowKey(["order", orderId]);
+  }
+
+  return rowKey([
+    "paper",
+    keyPart(row.signal_time),
+    keyPart(row.candle_open_time),
+    keyPart(row.direction),
+    keyPart(row.kind),
+    keyPart(row.entry_cents),
+    keyPart(row.stake_usd),
+    keyPart(row.result),
+  ]);
+}
+
+function orderEventRowKey(row: CsvRow): string {
+  const orderId = keyPart(row.order_id);
+  if (orderId) {
+    return rowKey(["order", keyPart(row.event_type), orderId, keyPart(row.candle_open_time)]);
+  }
+
+  return rowKey([
+    "event",
+    keyPart(row.event_time),
+    keyPart(row.event_type),
+    keyPart(row.signal_time),
+    keyPart(row.candle_open_time),
+  ]);
+}
+
+function missingRows(localRows: CsvRow[], sheetRows: CsvRow[], columns: string[], keyForRow: (row: CsvRow) => string): CsvRow[] {
+  const sheetKeys = new Set(sheetRows.filter((row) => rowHasValues(row, columns)).map(keyForRow));
+  const queuedKeys = new Set<string>();
+  return localRows.filter((row) => {
+    if (!rowHasValues(row, columns)) {
+      return false;
+    }
+
+    const key = keyForRow(row);
+    if (sheetKeys.has(key) || queuedKeys.has(key)) {
+      return false;
+    }
+
+    queuedKeys.add(key);
+    return true;
+  });
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -141,6 +256,49 @@ export class GoogleSheetsLogger {
     );
   }
 
+  async reconcileLocalCsvLogs(
+    tradeRows: CsvRow[],
+    orderEventRows: CsvRow[],
+    options: { allowEmptySheetBackfill?: boolean; refreshStats?: boolean } = {}
+  ): Promise<GoogleSheetsReconcileResult> {
+    await this.ensureSheets();
+    const [sheetTradeRows, sheetOrderEventRows] = await Promise.all([
+      this.readTradeRowsFromSheet(),
+      this.readOrderEventRowsFromSheet(),
+    ]);
+    const sheetHasData = sheetTradeRows.length > 0 || sheetOrderEventRows.length > 0;
+    const shouldBackfillRows = sheetHasData || options.allowEmptySheetBackfill === true;
+    const missingTradeRows = shouldBackfillRows ? missingRows(tradeRows, sheetTradeRows, tradeCsvColumns, tradeRowKey) : [];
+    const missingOrderEventRows = shouldBackfillRows
+      ? missingRows(orderEventRows, sheetOrderEventRows, orderEventCsvColumns, orderEventRowKey)
+      : [];
+
+    if (missingTradeRows.length > 0) {
+      await this.appendValues(
+        this.config.googleSheetsTradesSheetName,
+        tradeCsvColumns.length,
+        csvRowsToSheetValues(missingTradeRows, tradeCsvColumns)
+      );
+    }
+
+    if (missingOrderEventRows.length > 0) {
+      await this.appendValues(
+        this.config.googleSheetsOrderEventsSheetName,
+        orderEventCsvColumns.length,
+        csvRowsToSheetValues(missingOrderEventRows, orderEventCsvColumns)
+      );
+    }
+
+    if (missingTradeRows.length > 0 || options.refreshStats) {
+      await this.refreshStats();
+    }
+
+    return {
+      tradesAppended: missingTradeRows.length,
+      orderEventsAppended: missingOrderEventRows.length,
+    };
+  }
+
   private async ensureSheetsInternal(): Promise<void> {
     const titles = await this.getSheetTitles();
     await this.ensureSheetExists(this.config.googleSheetsTradesSheetName, titles);
@@ -192,7 +350,15 @@ export class GoogleSheetsLogger {
   }
 
   private async readTradeRowsFromSheet(): Promise<CsvRow[]> {
-    const range = sheetRange(this.config.googleSheetsTradesSheetName, `A:${columnName(tradeCsvColumns.length)}`);
+    return this.readRowsFromSheet(this.config.googleSheetsTradesSheetName, tradeCsvColumns.length);
+  }
+
+  private async readOrderEventRowsFromSheet(): Promise<CsvRow[]> {
+    return this.readRowsFromSheet(this.config.googleSheetsOrderEventsSheetName, orderEventCsvColumns.length);
+  }
+
+  private async readRowsFromSheet(sheetName: string, columnCount: number): Promise<CsvRow[]> {
+    const range = sheetRange(sheetName, `A:${columnName(columnCount)}`);
     const response = await this.requestJson<ValueRangeResponse>(
       "GET",
       `/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`

@@ -18,6 +18,7 @@ import {
   logSkip,
   logStartup,
   logWarmup,
+  readCsvRows,
   refreshStatsLog,
 } from "./logging/logger";
 import { GoogleSheetsLogger } from "./logging/googleSheetsLogger";
@@ -128,13 +129,41 @@ function queueGoogleSheetsTask(task: () => Promise<void>): void {
 
   googleSheetsQueue = googleSheetsQueue
     .then(task)
-    .catch((error) => {
+    .catch(async (error) => {
       logError(error);
+      try {
+        await sleep(1_000);
+        await reconcileGoogleSheetsFromLocalCsv("recovering after failed Google Sheets write", true, true);
+      } catch (reconcileError) {
+        logError(reconcileError);
+      }
     });
 }
 
 async function drainGoogleSheetsQueue(timeoutMs: number): Promise<void> {
   await Promise.race([googleSheetsQueue, sleep(timeoutMs)]);
+}
+
+async function reconcileGoogleSheetsFromLocalCsv(
+  reason: string,
+  refreshStats: boolean,
+  allowEmptySheetBackfill = false
+): Promise<void> {
+  const logger = googleSheetsLogger;
+  if (!logger) {
+    return;
+  }
+
+  const result = await logger.reconcileLocalCsvLogs(
+    config.localCsvLoggingEnabled ? readCsvRows(config.logFile) : [],
+    config.localCsvLoggingEnabled ? readCsvRows(config.orderEventsFile) : [],
+    { allowEmptySheetBackfill, refreshStats }
+  );
+  if (result.tradesAppended > 0 || result.orderEventsAppended > 0) {
+    logSkip(
+      `Google Sheets local CSV reconciliation appended ${result.tradesAppended} trade row(s) and ${result.orderEventsAppended} order event row(s): ${reason}`
+    );
+  }
 }
 
 function secondsIntoCandle(candle: Candle, now: number): number {
@@ -674,7 +703,7 @@ async function initializeGoogleSheets(): Promise<void> {
 
   try {
     await googleSheetsLogger.ensureSheets();
-    await googleSheetsLogger.refreshStats();
+    await reconcileGoogleSheetsFromLocalCsv("startup sync", true);
   } catch (error) {
     logError(error);
   }

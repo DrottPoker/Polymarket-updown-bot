@@ -177,7 +177,7 @@ function parseCsvLine(line: string): string[] {
   return values;
 }
 
-function readCsvRows(file: string): CsvRow[] {
+export function readCsvRows(file: string): CsvRow[] {
   const absolutePath = resolve(file);
   if (!existsSync(absolutePath)) {
     return [];

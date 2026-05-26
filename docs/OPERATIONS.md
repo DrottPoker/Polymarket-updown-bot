@@ -177,11 +177,11 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. `ORDER_NOT_FILLED` rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
+Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. `ORDER_NOT_FILLED` rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known.
 
 When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is allowed for paper mode when Google Sheets is your main trade log. Live mode requires local CSV logging because order events and recovery state need a durable local audit trail.
 
-Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`.
+Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`. When local CSV logging is enabled, startup and failed-write recovery reconcile local `trades.csv` and `order-events.csv` into Google Sheets by appending rows that are missing by order or event key, then refreshing stats. Startup reconciliation does not bulk import old local CSV rows when both raw Google Sheets tabs are empty. This keeps Sheets recoverable without blocking live order management.
 
 To clear the Google Sheets trade log and reset the Google Sheets dashboard:
 

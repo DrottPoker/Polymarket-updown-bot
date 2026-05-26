@@ -229,7 +229,7 @@ It handles:
 - Google Sheets log clearing for remote restart.
 - Timeout-bound HTTP requests.
 
-Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab. The main loop queues Google Sheets writes outside the live order-management path.
+Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab. The main loop queues Google Sheets writes outside the live order-management path. When local CSV logging is enabled, startup and failed-write recovery reconcile missing local CSV rows into the configured Google Sheets `Trades` and `Order Events` tabs. Startup reconciliation skips bulk backfill when both raw Google Sheets tabs are empty, so an intentional remote reset stays empty.
 
 ## Runtime Flow
 
@@ -344,7 +344,7 @@ This keeps retry state consistent without placing unwanted trades.
 
 `bot-state.json` contains restart recovery state for pending live orders and risk counters.
 
-When Google Sheets is enabled and `localCsvLoggingEnabled` is `false`, resolved paper trades are written only to the configured Google Sheets `Trades` tab and stats are derived only from that tab. Live mode requires local CSV logging.
+When Google Sheets is enabled and `localCsvLoggingEnabled` is `false`, resolved paper trades are written only to the configured Google Sheets `Trades` tab and stats are derived only from that tab. When local CSV logging is enabled, local CSV rows are used to recover missing Google Sheets rows by order or event key. Live mode requires local CSV logging.
 
 These files are runtime output and should not be edited by code changes unless the task is specifically about local log repair.
 

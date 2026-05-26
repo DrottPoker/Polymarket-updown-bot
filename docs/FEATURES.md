@@ -396,9 +396,9 @@ The `Order Events` tab records live execution events that are not trades:
 
 `live_status` is the initial status returned by Polymarket when the order was posted. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
-Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard. For paper mode, `localCsvLoggingEnabled` can be set to `false` when Google Sheets is the only desired log target. Live mode requires local CSV logging for durable audit and recovery support.
+For paper mode, `localCsvLoggingEnabled` can be set to `false` when Google Sheets is the only desired log target. Live mode requires local CSV logging for durable audit and recovery support.
 
-Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`.
+Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`. When local CSV logging is enabled, startup and failed-write recovery reconcile local `trades.csv` and `order-events.csv` into Google Sheets by appending rows that are missing by order or event key, then refreshing stats. Startup reconciliation does not bulk import old local CSV rows when both raw Google Sheets tabs are empty.
 
 Run this to clear the Google Sheets trade log and restart the Google Sheets dashboard from zero:
 
