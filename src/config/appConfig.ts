@@ -10,11 +10,12 @@ type BotConfigFile = Partial<{
   entryCents: number;
   tradeWindowSeconds: number;
   stakeUsd: number;
-  evStakeUsd: number;
   pollMs: number;
   candleLimit: number;
   logFile: string;
   statsFile: string;
+  orderEventsFile: string;
+  runtimeStateFile: string;
   localCsvLoggingEnabled: boolean;
   binanceBaseUrl: string;
   ignoreDojiInTrend: boolean;
@@ -22,7 +23,6 @@ type BotConfigFile = Partial<{
   retryWaitCandles: number;
   executionMode: string;
   liveTradingEnabled: boolean;
-  liveConfirmation: string;
   gammaBaseUrl: string;
   polymarketRtdsUrl: string;
   polymarketRtdsFirstPriceTimeoutMs: number;
@@ -53,6 +53,7 @@ type BotConfigFile = Partial<{
   googleSheetsTradesSheetName: string;
   googleSheetsStatsSheetName: string;
   googleSheetsOrderEventsSheetName: string;
+  googleSheetsRequestTimeoutMs: number;
 }>;
 
 type ConfigKey = keyof BotConfigFile;
@@ -64,11 +65,12 @@ export type AppConfig = {
   entryCents: number;
   tradeWindowSeconds: number;
   stakeUsd: number;
-  evStakeUsd: number;
   pollMs: number;
   candleLimit: number;
   logFile: string;
   statsFile: string;
+  orderEventsFile: string;
+  runtimeStateFile: string;
   localCsvLoggingEnabled: boolean;
   binanceBaseUrl: string;
   ignoreDojiInTrend: boolean;
@@ -76,7 +78,6 @@ export type AppConfig = {
   retryWaitCandles: number;
   executionMode: ExecutionMode;
   liveTradingEnabled: boolean;
-  liveConfirmation: string;
   gammaBaseUrl: string;
   polymarketRtdsUrl: string;
   polymarketRtdsFirstPriceTimeoutMs: number;
@@ -113,6 +114,7 @@ export type AppConfig = {
   googleSheetsTradesSheetName: string;
   googleSheetsStatsSheetName: string;
   googleSheetsOrderEventsSheetName: string;
+  googleSheetsRequestTimeoutMs: number;
   googleServiceAccountEmail: string;
   googlePrivateKey: string;
 };
@@ -232,11 +234,12 @@ export function loadConfig(): AppConfig {
     entryCents: readNumber(configFile, "entryCents", 51),
     tradeWindowSeconds: readNumber(configFile, "tradeWindowSeconds", 30),
     stakeUsd: readNumber(configFile, "stakeUsd", 5),
-    evStakeUsd: readNumber(configFile, "evStakeUsd", 100),
     pollMs: readNumber(configFile, "pollMs", 1000),
     candleLimit: readNumber(configFile, "candleLimit", 300),
     logFile: readString(configFile, "logFile", "trades.csv"),
     statsFile: readString(configFile, "statsFile", "stats.csv"),
+    orderEventsFile: readString(configFile, "orderEventsFile", "order-events.csv"),
+    runtimeStateFile: readString(configFile, "runtimeStateFile", "bot-state.json"),
     localCsvLoggingEnabled: readBoolean(configFile, "localCsvLoggingEnabled", true),
     binanceBaseUrl: readString(configFile, "binanceBaseUrl", "https://api.binance.com"),
     ignoreDojiInTrend: readBoolean(configFile, "ignoreDojiInTrend", true),
@@ -244,7 +247,6 @@ export function loadConfig(): AppConfig {
     retryWaitCandles: readNumber(configFile, "retryWaitCandles", 0),
     executionMode: readExecutionMode(configFile),
     liveTradingEnabled: readBoolean(configFile, "liveTradingEnabled", false),
-    liveConfirmation: readString(configFile, "liveConfirmation", ""),
     gammaBaseUrl: readString(configFile, "gammaBaseUrl", "https://gamma-api.polymarket.com"),
     polymarketRtdsUrl: readString(configFile, "polymarketRtdsUrl", "wss://ws-live-data.polymarket.com"),
     polymarketRtdsFirstPriceTimeoutMs: readNumber(configFile, "polymarketRtdsFirstPriceTimeoutMs", 15_000),
@@ -281,6 +283,7 @@ export function loadConfig(): AppConfig {
     googleSheetsTradesSheetName: readString(configFile, "googleSheetsTradesSheetName", "Trades"),
     googleSheetsStatsSheetName: readString(configFile, "googleSheetsStatsSheetName", "Stats"),
     googleSheetsOrderEventsSheetName: readString(configFile, "googleSheetsOrderEventsSheetName", "Order Events"),
+    googleSheetsRequestTimeoutMs: readNumber(configFile, "googleSheetsRequestTimeoutMs", 10_000),
     googleServiceAccountEmail: readSecretString("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
     googlePrivateKey: readGooglePrivateKey(),
   };
@@ -302,16 +305,28 @@ function validateConfig(config: AppConfig): void {
     throw new Error("stakeUsd must be greater than 0");
   }
 
-  if (config.evStakeUsd <= 0) {
-    throw new Error("evStakeUsd must be greater than 0");
-  }
-
   if (config.pollMs <= 0) {
     throw new Error("pollMs must be greater than 0");
   }
 
   if (!Number.isInteger(config.candleLimit) || config.candleLimit < 110 || config.candleLimit > 1000) {
     throw new Error("candleLimit must be an integer between 110 and 1000");
+  }
+
+  if (!config.logFile.trim()) {
+    throw new Error("logFile must not be empty");
+  }
+
+  if (!config.statsFile.trim()) {
+    throw new Error("statsFile must not be empty");
+  }
+
+  if (!config.orderEventsFile.trim()) {
+    throw new Error("orderEventsFile must not be empty");
+  }
+
+  if (!config.runtimeStateFile.trim()) {
+    throw new Error("runtimeStateFile must not be empty");
   }
 
   if (!Number.isInteger(config.retryWaitCandles) || config.retryWaitCandles < 0 || config.retryWaitCandles > 10) {
@@ -390,12 +405,20 @@ function validateConfig(config: AppConfig): void {
     throw new Error("polymarketRtdsFirstPriceTimeoutMs must be greater than 0");
   }
 
+  if (config.googleSheetsRequestTimeoutMs <= 0) {
+    throw new Error("googleSheetsRequestTimeoutMs must be greater than 0");
+  }
+
   if (
     config.priceSource === "polymarket_chainlink" &&
     !config.polymarketRtdsUrl.startsWith("ws://") &&
     !config.polymarketRtdsUrl.startsWith("wss://")
   ) {
     throw new Error("polymarketRtdsUrl must be a valid ws(s) URL");
+  }
+
+  if (config.priceSource === "polymarket_chainlink" && config.interval.toLowerCase() !== config.polymarketIntervalSlug) {
+    throw new Error("interval and polymarketIntervalSlug must match when priceSource=polymarket_chainlink");
   }
 
   if (clockTimeToMinutes(config.noTradeStart) === clockTimeToMinutes(config.noTradeEnd)) {
@@ -465,16 +488,20 @@ function validateLiveConfig(config: AppConfig): void {
     throw new Error("executionMode=live requires liveTradingEnabled=true");
   }
 
-  if (config.liveConfirmation !== "PLACE_REAL_POLYMARKET_ORDERS") {
-    throw new Error('executionMode=live requires liveConfirmation="PLACE_REAL_POLYMARKET_ORDERS"');
+  if (config.priceSource !== "polymarket_chainlink") {
+    throw new Error("executionMode=live requires priceSource=polymarket_chainlink");
   }
 
-  if (!config.polymarketPrivateKey || !config.polymarketPrivateKey.startsWith("0x")) {
-    throw new Error("executionMode=live requires POLYMARKET_PRIVATE_KEY as a 0x-prefixed private key");
+  if (!config.localCsvLoggingEnabled) {
+    throw new Error("executionMode=live requires localCsvLoggingEnabled=true for durable local audit logs");
   }
 
-  if (!config.polymarketFunderAddress || !config.polymarketFunderAddress.startsWith("0x")) {
-    throw new Error("executionMode=live requires POLYMARKET_FUNDER_ADDRESS");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(config.polymarketPrivateKey)) {
+    throw new Error("executionMode=live requires POLYMARKET_PRIVATE_KEY as a 32-byte 0x-prefixed private key");
+  }
+
+  if (!/^0x[0-9a-fA-F]{40}$/.test(config.polymarketFunderAddress)) {
+    throw new Error("executionMode=live requires POLYMARKET_FUNDER_ADDRESS as a 0x-prefixed address");
   }
 
   if (!config.polygonRpcUrl.startsWith("http://") && !config.polygonRpcUrl.startsWith("https://")) {

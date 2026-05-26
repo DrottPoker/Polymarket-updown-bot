@@ -72,7 +72,7 @@ nano .env
 {
   "priceSource": "polymarket_chainlink",
   "liveTradingEnabled": true,
-  "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS",
+  "localCsvLoggingEnabled": true,
   "polymarketSignatureType": 3,
   "stakeUsd": 5,
   "maxStakeUsd": 5,
@@ -88,6 +88,8 @@ Recommended:
 {
   "logFile": "trades.csv",
   "statsFile": "stats.csv",
+  "orderEventsFile": "order-events.csv",
+  "runtimeStateFile": "bot-state.json",
   "localCsvLoggingEnabled": true,
   "earlyEntryEnabled": true,
   "earlyEntryPrimarySecondsBeforeClose": 15,
@@ -119,7 +121,9 @@ Never commit `.env` or `bot.config.json` to GitHub.
 
 `priceSource: "polymarket_chainlink"` uses Polymarket Gamma metadata for historical resolved candles and the Polymarket RTDS Chainlink WebSocket for live/current candles. This is the recommended source for current crypto Up/Down markets because Binance candles can disagree with Chainlink-resolved settlement.
 
-Closed trade candles prefer official Gamma metadata. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. If the newest closed candle is not official yet but RTDS has an open and close, the bot can use that provisional closed candle for trend state and entry decisions so it does not stall. If official Gamma metadata later replaces that provisional candle, the bot logs `[CANDLE_CORRECTION]` and updates the stored candle.
+Closed trade candles prefer official Gamma metadata. The bot uses `priceToBeat` as the open and `finalPrice`, or the next event `priceToBeat`, as the close. If Gamma has already resolved the market outcome but has not published a numeric final price, the bot uses the resolved `Up` or `Down` outcome to build a directional fallback candle. If the newest closed candle is not official yet but RTDS has an open and close, the bot can use that provisional closed candle for trend state and entry decisions so it does not stall. Pending trade settlement waits for official data. If official Gamma metadata later replaces a provisional trend candle, the bot logs `[CANDLE_CORRECTION]` and rebuilds strategy state from processed candle history.
+
+Live mode writes pending order state and risk counters to `runtimeStateFile`. If the process restarts while an order is pending or canceled but unresolved, startup restores it and blocks new entries until the old trade is resolved.
 
 `liveFullFillToleranceShares` treats tiny CLOB dust differences as full fills. With the default `0.01`, a 6-share order filled as `5.9936` is logged as a full 6-share fill.
 
@@ -161,7 +165,8 @@ Enable Google Sheets logging in `bot.config.json`:
   "googleSheetsSpreadsheetId": "SPREADSHEET_ID",
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
-  "googleSheetsOrderEventsSheetName": "Order Events"
+  "googleSheetsOrderEventsSheetName": "Order Events",
+  "googleSheetsRequestTimeoutMs": 10000
 }
 ```
 
@@ -174,7 +179,9 @@ GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\
 
 Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard.
 
-When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is recommended when Google Sheets is your main trade log on a VPS.
+When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is allowed for paper mode when Google Sheets is your main trade log. Live mode requires local CSV logging because order events and recovery state need a durable local audit trail.
+
+Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`.
 
 To clear the Google Sheets trade log and reset the Google Sheets dashboard:
 
@@ -349,7 +356,7 @@ git pull
 
 ## Trade And Stats Files
 
-Local CSV files are optional. They are only used when `localCsvLoggingEnabled` is `true`.
+Local CSV files are optional in paper mode. Live mode requires `localCsvLoggingEnabled=true`.
 
 When enabled, the bot writes resolved trades to:
 
@@ -361,6 +368,18 @@ When enabled, the bot writes aggregate statistics to:
 
 ```text
 stats.csv
+```
+
+When enabled, the bot writes live order lifecycle events to:
+
+```text
+order-events.csv
+```
+
+Live mode also writes restart recovery state to:
+
+```text
+bot-state.json
 ```
 
 These files can be opened in Excel or imported into Google Sheets.

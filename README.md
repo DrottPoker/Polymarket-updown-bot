@@ -102,9 +102,9 @@ Local CSV logging is controlled by `localCsvLoggingEnabled`. When it is `true`, 
 
 When local CSV logging is enabled, the bot rewrites `statsFile` after each resolved trade with aggregate statistics for `TOTAL`, `BASE`, `RETRY`, `UP`, `DOWN`, `BASE_UP`, `BASE_DOWN`, `RETRY_UP`, and `RETRY_DOWN`.
 
-Those files can be opened directly in Excel or imported into Google Sheets.
+The local `orderEventsFile` records live order placement, fill, cancellation, and not-filled events. Those files can be opened directly in Excel or imported into Google Sheets.
 
-When Google Sheets logging is enabled, set `localCsvLoggingEnabled` to `false` if you want the VPS to avoid creating or changing local `trades.csv` and `stats.csv` files.
+Live mode requires `localCsvLoggingEnabled=true` so the bot has durable local audit logs even if Google Sheets is slow or unavailable. Runtime recovery state is written to `runtimeStateFile`.
 
 ## Google Sheets Logging
 
@@ -119,7 +119,8 @@ Enable it in `bot.config.json`:
   "googleSheetsSpreadsheetId": "your-spreadsheet-id",
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
-  "googleSheetsOrderEventsSheetName": "Order Events"
+  "googleSheetsOrderEventsSheetName": "Order Events",
+  "googleSheetsRequestTimeoutMs": 10000
 }
 ```
 
@@ -131,6 +132,8 @@ GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\
 ```
 
 Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so they can be analyzed without being counted as filled trades. Local CSV trades are not imported or counted in the Google Sheets dashboard. Google Sheets errors are logged, but they do not stop the bot from managing trades.
+
+Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`. Live order placement and cancellation do not wait on Sheets after the local audit log has been written.
 
 For live trades, `live_status` is the initial Polymarket order status. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
@@ -210,6 +213,7 @@ Real live mode additionally uses:
 - Automatic cancel at `candleOpenTime + tradeWindowSeconds`.
 - Fill checking through authenticated CLOB order and trade data before any due cancel is sent.
 - Full-fill confirmation based on successful CLOB trade records for the specific order id. The initial post response status is not enough to count a live trade as filled.
+- A local runtime state file so pending live orders and risk counters survive process restart.
 - A zero-fill canceled order updates strategy state hypothetically but does not create a trade row.
 - A partially filled canceled order logs the filled portion as a realized trade and still updates strategy state using the signal result.
 
@@ -235,7 +239,6 @@ Then set live guards and risk limits in `bot.config.json`:
 ```json
 {
   "liveTradingEnabled": true,
-  "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS",
   "polymarketSignatureType": 3,
   "tradeWindowSeconds": 60,
   "maxLiveTradeWindowSeconds": 60,

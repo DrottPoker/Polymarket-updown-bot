@@ -1,6 +1,12 @@
 import { AppConfig } from "../config/appConfig";
 import { PaperTrade, ResolvedPaperTrade } from "../domain/types";
 
+export type RuntimeRiskSnapshot = {
+  currentDay: string;
+  tradesToday: number;
+  realizedPnlToday: number;
+};
+
 function dayKey(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
@@ -10,7 +16,23 @@ export class RuntimeRiskManager {
   private tradesToday = 0;
   private realizedPnlToday = 0;
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly config: AppConfig, snapshot?: RuntimeRiskSnapshot) {
+    if (snapshot) {
+      this.currentDay = snapshot.currentDay;
+      this.tradesToday = snapshot.tradesToday;
+      this.realizedPnlToday = snapshot.realizedPnlToday;
+      this.rollDay(Date.now());
+    }
+  }
+
+  getSnapshot(): RuntimeRiskSnapshot {
+    this.rollDay(Date.now());
+    return {
+      currentDay: this.currentDay,
+      tradesToday: this.tradesToday,
+      realizedPnlToday: this.realizedPnlToday,
+    };
+  }
 
   assertCanOpen(trade: PaperTrade): void {
     this.rollDay(trade.signalTime);

@@ -104,6 +104,19 @@ export class TradingViewReversalStrategy {
     return this.getLastTrendColorsBeforeCurrent(count).reverse();
   }
 
+  reset(): void {
+    this.candles.length = 0;
+    Object.assign(this.stats, emptyStats());
+    this.barIndex = -1;
+    this.waitingForRetry = false;
+    this.retryReady = false;
+    this.retryTrendColor = null;
+    this.waitedCandles = 0;
+    this.blockedAfterLoss = false;
+    this.blockedTrendColor = null;
+    this.resetBarIndex = null;
+  }
+
   replaceProcessedCandle(candle: Candle): boolean {
     const index = this.candles.findIndex((processedCandle) => processedCandle.openTime === candle.openTime);
     if (index < 0) {

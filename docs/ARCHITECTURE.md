@@ -57,6 +57,7 @@ The main runtime loop. It owns:
 - Poll scheduling.
 - Pending trade state.
 - Pending live order state.
+- Runtime state persistence for pending live orders and risk counters.
 - Early-entry timing.
 - No-trade window checks.
 - Trade resolution.
@@ -226,8 +227,9 @@ It handles:
 - Trade row appends.
 - Stats tab replacement from Google Sheets `Trades` tab data.
 - Google Sheets log clearing for remote restart.
+- Timeout-bound HTTP requests.
 
-Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab.
+Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab. The main loop queues Google Sheets writes outside the live order-management path.
 
 ## Runtime Flow
 
@@ -338,9 +340,13 @@ This keeps retry state consistent without placing unwanted trades.
 
 `stats.csv` contains aggregate statistics generated from `trades.csv` when `localCsvLoggingEnabled` is `true`.
 
-When Google Sheets is enabled and `localCsvLoggingEnabled` is `false`, resolved trades are written only to the configured Google Sheets `Trades` tab and stats are derived only from that tab.
+`order-events.csv` contains local live order lifecycle events when `localCsvLoggingEnabled` is `true`.
 
-Both files are runtime output and should not be edited by code changes unless the task is specifically about local log repair.
+`bot-state.json` contains restart recovery state for pending live orders and risk counters.
+
+When Google Sheets is enabled and `localCsvLoggingEnabled` is `false`, resolved paper trades are written only to the configured Google Sheets `Trades` tab and stats are derived only from that tab. Live mode requires local CSV logging.
+
+These files are runtime output and should not be edited by code changes unless the task is specifically about local log repair.
 
 ### Build Output
 
@@ -382,8 +388,9 @@ Live execution requires multiple independent guards:
 
 - `executionMode` must be `live`.
 - `liveTradingEnabled` must be `true`.
-- `liveConfirmation` must equal `PLACE_REAL_POLYMARKET_ORDERS`.
-- Private key and funder address must be present.
+- `priceSource` must be `polymarket_chainlink`.
+- `localCsvLoggingEnabled` must be `true`.
+- Private key and funder address must be valid 0x values.
 - RPC URL must be valid.
 - Trade window must not exceed the live max window.
 - Entry, stake, daily loss, and trade count limits must pass.

@@ -31,6 +31,9 @@
     "dotenv": "^16.4.7",
     "viem": "^2.50.4"
   },
+  "overrides": {
+    "ws": "^8.20.1"
+  },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "ts-node": "^10.9.2",

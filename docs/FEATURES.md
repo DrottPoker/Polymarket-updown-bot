@@ -53,7 +53,8 @@ Required live guard fields:
 ```json
 {
   "liveTradingEnabled": true,
-  "liveConfirmation": "PLACE_REAL_POLYMARKET_ORDERS"
+  "priceSource": "polymarket_chainlink",
+  "localCsvLoggingEnabled": true
 }
 ```
 
@@ -297,7 +298,7 @@ Risk checks block live and dry-run orders when:
 
 `liveFullFillToleranceShares` is a dust tolerance for CLOB fill accounting. With the default `0.01`, a 6-share order filled as `5.9936` is treated as a full 6-share fill.
 
-Risk counters are in-memory for the running process.
+Risk counters are persisted to `runtimeStateFile` so live limits survive process restart.
 
 ## Local CSV Trade Log
 
@@ -306,7 +307,9 @@ Configured with:
 ```json
 {
   "localCsvLoggingEnabled": true,
-  "logFile": "trades.csv"
+  "logFile": "trades.csv",
+  "orderEventsFile": "order-events.csv",
+  "runtimeStateFile": "bot-state.json"
 }
 ```
 
@@ -327,6 +330,8 @@ The trade log includes:
 - Signal reason.
 - Base or retry kind.
 - Live market metadata when available.
+
+The order events log records live order placement, fill, final-check cancel, and not-filled events. Live mode requires local CSV logging so these audit records exist even when Google Sheets is unavailable.
 
 ## Local CSV Stats
 
@@ -366,7 +371,8 @@ Configured with:
   "googleSheetsSpreadsheetId": "your-spreadsheet-id",
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
-  "googleSheetsOrderEventsSheetName": "Order Events"
+  "googleSheetsOrderEventsSheetName": "Order Events",
+  "googleSheetsRequestTimeoutMs": 10000
 }
 ```
 
@@ -390,7 +396,9 @@ The `Order Events` tab records live execution events that are not trades:
 
 `live_status` is the initial status returned by Polymarket when the order was posted. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
-Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard. When Google Sheets is the main production log, `localCsvLoggingEnabled` can be set to `false` so the bot does not create or change local CSV files.
+Local CSV trades are not imported into Google Sheets and are not counted in the Google Sheets dashboard. For paper mode, `localCsvLoggingEnabled` can be set to `false` when Google Sheets is the only desired log target. Live mode requires local CSV logging for durable audit and recovery support.
+
+Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`.
 
 Run this to clear the Google Sheets trade log and restart the Google Sheets dashboard from zero:
 

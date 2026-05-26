@@ -328,6 +328,28 @@ export function ensureCsvLog(logFile: string): void {
   }
 }
 
+export function ensureOrderEventsCsvLog(logFile: string): void {
+  const absolutePath = resolve(logFile);
+  const directory = dirname(absolutePath);
+  mkdirSync(directory, { recursive: true });
+
+  if (!existsSync(absolutePath)) {
+    appendFileSync(absolutePath, `${orderEventCsvHeader}\n`, "utf8");
+    return;
+  }
+
+  const existing = readFileSync(absolutePath, "utf8");
+  const lines = existing.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    writeFileSync(absolutePath, `${orderEventCsvHeader}\n`, "utf8");
+    return;
+  }
+
+  if (lines[0] !== orderEventCsvHeader) {
+    throw new Error(`Cannot use ${logFile}; order event CSV header does not match the current schema`);
+  }
+}
+
 export function logStartup(config: AppConfig): void {
   logSection("START");
   console.log(`execution mode: ${config.executionMode}`);
@@ -336,7 +358,6 @@ export function logStartup(config: AppConfig): void {
   console.log(`interval: ${config.interval}`);
   console.log(`entry: ${config.entryCents}c`);
   console.log(`stake: $${config.stakeUsd}`);
-  console.log(`ev stake: $${config.evStakeUsd}`);
   console.log(`window: first ${config.tradeWindowSeconds}s`);
   console.log(`ignore doji in trend: ${config.ignoreDojiInTrend}`);
   console.log(`loss retry logic: ${config.useLossRetryLogic}`);
@@ -371,6 +392,7 @@ export function logStartup(config: AppConfig): void {
   if (config.localCsvLoggingEnabled) {
     console.log(`log: ${config.logFile}`);
     console.log(`stats: ${config.statsFile}`);
+    console.log(`order events: ${config.orderEventsFile}`);
   }
   console.log(`google sheets: ${config.googleSheetsEnabled}`);
   if (config.googleSheetsEnabled) {
@@ -561,6 +583,11 @@ export function buildOrderEventRow(event: OrderEvent): Array<string | number | b
 
 export function appendTradeResult(logFile: string, trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): void {
   const row = buildTradeResultRow(trade, liveOrder).map(csvEscape).join(",");
+  appendFileSync(resolve(logFile), `${row}\n`, "utf8");
+}
+
+export function appendOrderEvent(logFile: string, event: OrderEvent): void {
+  const row = buildOrderEventRow(event).map(csvEscape).join(",");
   appendFileSync(resolve(logFile), `${row}\n`, "utf8");
 }
 

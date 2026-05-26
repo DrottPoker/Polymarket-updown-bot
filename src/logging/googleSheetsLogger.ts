@@ -66,6 +66,20 @@ function normalizeValues(values: Array<Array<string | number | boolean | null | 
   return values.map((row) => row.map((value) => (value === null || value === undefined ? "" : value)));
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function sheetValuesToRows(values: Array<Array<string | number | boolean>>): CsvRow[] {
   if (values.length <= 1) {
     return [];
@@ -217,14 +231,18 @@ export class GoogleSheetsLogger {
 
   private async requestJson<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
     const accessToken = await this.getAccessToken();
-    const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${this.config.googleSheetsSpreadsheetId}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `https://sheets.googleapis.com/v4/spreadsheets/${this.config.googleSheetsSpreadsheetId}${path}`,
+      {
+        method,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+      this.config.googleSheetsRequestTimeoutMs
+    );
     const text = await response.text();
 
     if (!response.ok) {
@@ -241,16 +259,20 @@ export class GoogleSheetsLogger {
     }
 
     const assertion = this.createJwt(now);
-    const response = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+    const response = await fetchWithTimeout(
+      tokenUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          assertion,
+        }),
       },
-      body: new URLSearchParams({
-        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        assertion,
-      }),
-    });
+      this.config.googleSheetsRequestTimeoutMs
+    );
     const token = (await response.json()) as GoogleTokenResponse;
 
     if (!response.ok || !token.access_token) {

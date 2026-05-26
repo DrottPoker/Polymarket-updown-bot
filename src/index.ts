@@ -1,8 +1,10 @@
 import { loadConfig } from "./config/appConfig";
-import { Candle, LiveOrder, OrderEventType, PaperTrade, ResolvedPaperTrade } from "./domain/types";
+import { Candle, LiveOrder, OrderEvent, OrderEventType, PaperTrade, ResolvedPaperTrade } from "./domain/types";
 import {
+  appendOrderEvent,
   appendTradeResult,
   ensureCsvLog,
+  ensureOrderEventsCsvLog,
   logCandleCorrection,
   logCandleDecision,
   logError,
@@ -22,6 +24,7 @@ import { GoogleSheetsLogger } from "./logging/googleSheetsLogger";
 import { fetchCandles } from "./marketData/candles";
 import { closePolymarketChainlinkCandleSources } from "./marketData/polymarketChainlinkCandles";
 import { PolymarketLiveExecutor } from "./polymarket/liveExecutor";
+import { PendingLiveTradeState, RuntimeState, RuntimeStateStore } from "./state/runtimeStateStore";
 import { createPaperTrade, resizeTradeToLiveFill, resolvePaperTrade } from "./trading/paperBroker";
 import { RuntimeRiskManager } from "./trading/riskManager";
 import {
@@ -37,8 +40,10 @@ if (config.executionMode === "live" && runOnce) {
   throw new Error("RUN_ONCE is disabled in live mode because open orders need ongoing cancel/fill tracking");
 }
 
+const runtimeStateStore = new RuntimeStateStore(config);
+let runtimeState: RuntimeState = runtimeStateStore.load();
 const strategy = new TradingViewReversalStrategy(config);
-const riskManager = new RuntimeRiskManager(config);
+const riskManager = new RuntimeRiskManager(config, runtimeState.risk ?? undefined);
 const polymarketExecutor = config.executionMode !== "paper" ? new PolymarketLiveExecutor(config) : null;
 const liveExecutor = config.executionMode === "live" ? polymarketExecutor : null;
 const googleSheetsLogger = config.googleSheetsEnabled ? new GoogleSheetsLogger(config) : null;
@@ -59,10 +64,71 @@ let lastClosedCandleDataWaitOpenTime = 0;
 let lastPendingTradeSkipOpenTime = 0;
 let lastDecisionLogTargetOpenTime = 0;
 const processedClosedCandlesByOpenTime = new Map<number, Candle>();
+const processedTradeInputsByOpenTime = new Map<number, PaperTrade>();
+const historicalWarmupOpenTimes = new Set<number>();
+let googleSheetsQueue: Promise<void> = Promise.resolve();
 let shuttingDown = false;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function currentPendingLiveTradeState(): PendingLiveTradeState | null {
+  if (!pendingTrade || !pendingLiveOrder) {
+    return null;
+  }
+
+  return {
+    trade: pendingTrade,
+    liveOrder: pendingLiveOrder,
+    earlyEntryTargetOpenTime: pendingEarlyEntryTargetOpenTime,
+    earlyEntryFinalValidationDone: pendingEarlyEntryFinalValidationDone,
+  };
+}
+
+function persistRuntimeState(): void {
+  runtimeState = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    risk: riskManager.getSnapshot(),
+    pendingLiveTrade: currentPendingLiveTradeState(),
+  };
+  runtimeStateStore.save(runtimeState);
+}
+
+function persistPendingLiveTradeState(): void {
+  if (config.executionMode === "live") {
+    persistRuntimeState();
+  }
+}
+
+function clearPersistedPendingLiveTradeState(): void {
+  if (config.executionMode !== "live") {
+    return;
+  }
+
+  runtimeState = {
+    ...runtimeState,
+    risk: riskManager.getSnapshot(),
+    pendingLiveTrade: null,
+  };
+  runtimeStateStore.save(runtimeState);
+}
+
+function queueGoogleSheetsTask(task: () => Promise<void>): void {
+  if (!googleSheetsLogger) {
+    return;
+  }
+
+  googleSheetsQueue = googleSheetsQueue
+    .then(task)
+    .catch((error) => {
+      logError(error);
+    });
+}
+
+async function drainGoogleSheetsQueue(timeoutMs: number): Promise<void> {
+  await Promise.race([googleSheetsQueue, sleep(timeoutMs)]);
 }
 
 function secondsIntoCandle(candle: Candle, now: number): number {
@@ -132,6 +198,10 @@ function logWaitingForClosedCandleData(openTime: number): void {
 }
 
 function liveFillProgress(order: LiveOrder | null): string {
+  if (order?.fillStatus === "unknown") {
+    return `; fill status unknown${order.fillError ? ` (${order.fillError})` : ""}`;
+  }
+
   if (!order || !order.filledSize || order.filledSize <= 0) {
     return "";
   }
@@ -140,7 +210,7 @@ function liveFillProgress(order: LiveOrder | null): string {
 }
 
 function liveFilledSize(order: LiveOrder | null): number {
-  if (!order || !order.filledSize || order.filledSize <= 0) {
+  if (!order || order.fillStatus === "unknown" || !order.filledSize || order.filledSize <= 0) {
     return 0;
   }
 
@@ -148,8 +218,8 @@ function liveFilledSize(order: LiveOrder | null): number {
   return order.size - filledSize <= config.liveFullFillToleranceShares ? order.size : filledSize;
 }
 
-function hasPartialLiveFill(order: LiveOrder | null): order is LiveOrder {
-  return Boolean(order && !order.filled && liveFilledSize(order) > 0);
+function hasPartialLiveFill(order: LiveOrder | null): boolean {
+  return Boolean(order && order.fillStatus !== "unknown" && !order.filled && liveFilledSize(order) > 0);
 }
 
 function liveOrderForFilledPortion(order: LiveOrder): LiveOrder {
@@ -228,8 +298,34 @@ function candlesDiffer(left: Candle, right: Candle): boolean {
   );
 }
 
+function shouldWaitForOfficialSettlement(candle: Candle): boolean {
+  return config.priceSource === "polymarket_chainlink" && candle.settlement === "provisional";
+}
+
 function rememberProcessedClosedCandle(candle: Candle): void {
   processedClosedCandlesByOpenTime.set(candle.openTime, candle);
+}
+
+function rebuildStrategyFromProcessedHistory(): void {
+  strategy.reset();
+  const processedCandles = Array.from(processedClosedCandlesByOpenTime.values())
+    .filter((candle) => candle.openTime <= lastProcessedClosedCandleOpenTime)
+    .sort((a, b) => a.openTime - b.openTime);
+
+  for (const candle of processedCandles) {
+    const trade = processedTradeInputsByOpenTime.get(candle.openTime);
+    if (trade) {
+      strategy.recordTradeResult(resolvePaperTrade(trade, candle), candle);
+      continue;
+    }
+
+    if (historicalWarmupOpenTimes.has(candle.openTime)) {
+      strategy.warmUp([candle]);
+      continue;
+    }
+
+    strategy.processClosedCandleWithoutTrade(candle);
+  }
 }
 
 function processOfficialClosedCandleCorrections(closedCandles: Candle[]): void {
@@ -243,10 +339,9 @@ function processOfficialClosedCandleCorrections(closedCandles: Candle[]): void {
       continue;
     }
 
-    if (strategy.replaceProcessedCandle(candle)) {
-      rememberProcessedClosedCandle(candle);
-      logCandleCorrection(previous, candle);
-    }
+    rememberProcessedClosedCandle(candle);
+    rebuildStrategyFromProcessedHistory();
+    logCandleCorrection(previous, candle);
   }
 }
 
@@ -258,6 +353,7 @@ function warmUpStrategy(closedCandles: Candle[]): void {
   strategy.warmUp(closedCandles);
   for (const candle of closedCandles) {
     rememberProcessedClosedCandle(candle);
+    historicalWarmupOpenTimes.add(candle.openTime);
   }
   lastProcessedClosedCandleOpenTime = closedCandles[closedCandles.length - 1]?.openTime ?? 0;
   initialized = true;
@@ -308,32 +404,48 @@ async function cancelPendingLiveOrder(): Promise<void> {
       logLiveCancel(updatedOrder);
     }
     pendingLiveOrder = updatedOrder;
+    persistPendingLiveTradeState();
   } catch (error) {
     logError(error);
   }
 }
 
-async function syncGoogleSheetsOrderEvent(
+function writeLocalOrderEvent(event: OrderEvent): void {
+  if (!config.localCsvLoggingEnabled) {
+    return;
+  }
+
+  appendOrderEvent(config.orderEventsFile, event);
+}
+
+function syncGoogleSheetsOrderEvent(
   eventType: OrderEventType,
   trade: PaperTrade,
   liveOrder?: LiveOrder | null,
   detail?: string
-): Promise<void> {
-  if (!googleSheetsLogger) {
-    return;
-  }
+): void {
+  const event: OrderEvent = {
+    eventTime: Date.now(),
+    eventType,
+    trade,
+    liveOrder,
+    detail,
+  };
 
   try {
-    await googleSheetsLogger.appendOrderEvent({
-      eventTime: Date.now(),
-      eventType,
-      trade,
-      liveOrder,
-      detail,
-    });
+    writeLocalOrderEvent(event);
   } catch (error) {
     logError(error);
   }
+
+  const logger = googleSheetsLogger;
+  if (!logger) {
+    return;
+  }
+
+  queueGoogleSheetsTask(async () => {
+    await logger.appendOrderEvent(event);
+  });
 }
 
 async function refreshPendingLiveOrderFillStatus(): Promise<void> {
@@ -347,6 +459,7 @@ async function refreshPendingLiveOrderFillStatus(): Promise<void> {
     if (!wasFilled && pendingLiveOrder.filled) {
       logLiveFill(pendingLiveOrder);
     }
+    persistPendingLiveTradeState();
   } catch (error) {
     logError(error);
   }
@@ -367,6 +480,7 @@ async function cancelPendingLiveOrderIfDue(now: number): Promise<void> {
       logLiveCancel(updatedOrder);
     }
     pendingLiveOrder = updatedOrder;
+    persistPendingLiveTradeState();
   } catch (error) {
     logError(error);
   }
@@ -385,6 +499,7 @@ async function cancelInvalidatedPendingEarlyEntry(currentCandle: Candle, reason:
   if (!liveExecutor || !pendingLiveOrder) {
     pendingTrade = null;
     clearPendingEarlyEntryTracking();
+    clearPersistedPendingLiveTradeState();
     return;
   }
 
@@ -394,11 +509,13 @@ async function cancelInvalidatedPendingEarlyEntry(currentCandle: Candle, reason:
       `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed, but live order is already filled; trade will be managed to candle close`
     );
     pendingEarlyEntryFinalValidationDone = true;
+    persistPendingLiveTradeState();
     return;
   }
 
   await cancelPendingLiveOrder();
-  if (pendingLiveOrder?.filled) {
+  const orderAfterCancel = pendingLiveOrder;
+  if (orderAfterCancel?.filled) {
     logSkip(
       `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed, but live order filled before cancel completed; trade will be managed to candle close`
     );
@@ -406,11 +523,34 @@ async function cancelInvalidatedPendingEarlyEntry(currentCandle: Candle, reason:
     return;
   }
 
-  if (pendingLiveOrder?.canceled) {
-    await syncGoogleSheetsOrderEvent("FINAL_CHECK_CANCELED", pendingTrade, pendingLiveOrder, reason);
+  if (orderAfterCancel?.fillStatus === "unknown") {
+    logSkip(
+      `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed, but live fill status is unknown${liveFillProgress(
+        orderAfterCancel
+      )}; trade will remain pending until fill status is known`
+    );
+    pendingEarlyEntryFinalValidationDone = true;
+    persistPendingLiveTradeState();
+    return;
+  }
+
+  if (orderAfterCancel && hasPartialLiveFill(orderAfterCancel)) {
+    logSkip(
+      `${new Date(currentCandle.openTime).toISOString()} final early-entry validation failed, but live order was partially filled${liveFillProgress(
+        orderAfterCancel
+      )}; filled portion will be managed to candle close`
+    );
+    pendingEarlyEntryFinalValidationDone = true;
+    persistPendingLiveTradeState();
+    return;
+  }
+
+  if (orderAfterCancel?.canceled) {
+    syncGoogleSheetsOrderEvent("FINAL_CHECK_CANCELED", pendingTrade, orderAfterCancel, reason);
     pendingTrade = null;
     pendingLiveOrder = null;
     clearPendingEarlyEntryTracking();
+    clearPersistedPendingLiveTradeState();
   }
 }
 
@@ -437,8 +577,9 @@ async function openTrade(trade: PaperTrade, sourceCandleOpenTime: number): Promi
       pendingLiveOrder = await liveExecutor.placeLimitBuy(trade);
       pendingTrade = trade;
       riskManager.recordOrderPlaced(trade.signalTime);
+      persistRuntimeState();
       logLiveOrder(pendingLiveOrder);
-      await syncGoogleSheetsOrderEvent("ORDER_PLACED", trade, pendingLiveOrder);
+      syncGoogleSheetsOrderEvent("ORDER_PLACED", trade, pendingLiveOrder);
       return true;
     } catch (error) {
       logError(error);
@@ -464,17 +605,16 @@ async function initializeGoogleSheets(): Promise<void> {
   }
 }
 
-async function syncGoogleSheetsTrade(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): Promise<void> {
-  if (!googleSheetsLogger) {
+function syncGoogleSheetsTrade(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | null): void {
+  const logger = googleSheetsLogger;
+  if (!logger) {
     return;
   }
 
-  try {
-    await googleSheetsLogger.appendTradeResult(trade, liveOrder);
-    await googleSheetsLogger.refreshStats();
-  } catch (error) {
-    logError(error);
-  }
+  queueGoogleSheetsTask(async () => {
+    await logger.appendTradeResult(trade, liveOrder);
+    await logger.refreshStats();
+  });
 }
 
 function initializeLocalCsvLogs(): void {
@@ -483,6 +623,7 @@ function initializeLocalCsvLogs(): void {
   }
 
   ensureCsvLog(config.logFile);
+  ensureOrderEventsCsvLog(config.orderEventsFile);
   refreshStatsLog(config.logFile, config.statsFile);
 }
 
@@ -493,6 +634,36 @@ function writeLocalTradeLogs(trade: ResolvedPaperTrade, liveOrder?: LiveOrder | 
 
   appendTradeResult(config.logFile, trade, liveOrder);
   refreshStatsLog(config.logFile, config.statsFile);
+}
+
+async function recoverPersistedPendingLiveTrade(): Promise<void> {
+  const pendingState = runtimeState.pendingLiveTrade;
+  if (!pendingState) {
+    return;
+  }
+
+  if (config.executionMode !== "live") {
+    logSkip(
+      `Ignoring persisted live order ${pendingState.liveOrder.orderId ?? "unknown"} because execution mode is ${config.executionMode}`
+    );
+    return;
+  }
+
+  pendingTrade = pendingState.trade;
+  pendingLiveOrder = {
+    ...pendingState.liveOrder,
+    fillStatus: pendingState.liveOrder.fillStatus ?? "known",
+  };
+  pendingEarlyEntryTargetOpenTime = pendingState.earlyEntryTargetOpenTime;
+  pendingEarlyEntryFinalValidationDone = pendingState.earlyEntryFinalValidationDone;
+  logSkip(
+    `${new Date(pendingTrade.candleOpenTime).toISOString()} recovered pending live order ${
+      pendingLiveOrder.orderId ?? "unknown"
+    } from ${config.runtimeStateFile}; new entries are blocked until it is resolved`
+  );
+
+  await refreshPendingLiveOrderFillStatus();
+  await cancelPendingLiveOrderIfDue(Date.now());
 }
 
 async function maybeOpenEarlyEntry(
@@ -602,16 +773,36 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
 
   for (const candle of newClosedCandles) {
     if (pendingStrategyOnlyTrade && pendingStrategyOnlyTrade.candleOpenTime === candle.openTime) {
+      if (shouldWaitForOfficialSettlement(candle)) {
+        logSkip(`${new Date(candle.openTime).toISOString()} waiting for official settlement before resolving strategy-only signal`);
+        return;
+      }
+
       const strategyOnlyTrade = resolvePaperTrade(pendingStrategyOnlyTrade, candle);
       logSkip(
         `${new Date(candle.openTime).toISOString()} no-trade window strategy-only signal resolved as hypothetical ${strategyOnlyTrade.result}`
       );
+      processedTradeInputsByOpenTime.set(candle.openTime, pendingStrategyOnlyTrade);
       strategy.recordTradeResult(strategyOnlyTrade, candle);
       pendingStrategyOnlyTrade = null;
     } else if (pendingTrade && pendingTrade.candleOpenTime === candle.openTime) {
+      if (shouldWaitForOfficialSettlement(candle)) {
+        logSkip(`${new Date(candle.openTime).toISOString()} waiting for official settlement before resolving pending trade`);
+        return;
+      }
+
       await refreshPendingLiveOrderFillStatus();
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
         await cancelPendingLiveOrder();
+      }
+      if (liveExecutor && pendingLiveOrder?.fillStatus === "unknown") {
+        logSkip(
+          `${new Date(candle.openTime).toISOString()} live order fill status is unknown${liveFillProgress(
+            pendingLiveOrder
+          )}; trade resolution is paused until CLOB fill status is known`
+        );
+        persistPendingLiveTradeState();
+        return;
       }
       if (liveExecutor && pendingLiveOrder && !pendingLiveOrder.filled) {
         const strategyOnlyTrade = resolvePaperTrade(pendingTrade, candle);
@@ -623,18 +814,20 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
           );
           logResult(realizedTrade);
           writeLocalTradeLogs(realizedTrade, realizedLiveOrder);
-          await syncGoogleSheetsTrade(realizedTrade, realizedLiveOrder);
-          await syncGoogleSheetsOrderEvent(
+          syncGoogleSheetsTrade(realizedTrade, realizedLiveOrder);
+          syncGoogleSheetsOrderEvent(
             "ORDER_NOT_FILLED",
             pendingTrade,
             pendingLiveOrder,
             "Order was partially filled by candle close and logged proportionally"
           );
           strategy.recordTradeResult(strategyOnlyTrade, candle);
+          processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);
           riskManager.recordResolvedTrade(realizedTrade);
           pendingTrade = null;
           pendingLiveOrder = null;
           clearPendingEarlyEntryTracking();
+          clearPersistedPendingLiveTradeState();
           finishProcessedClosedCandle(candle);
           continue;
         }
@@ -642,16 +835,18 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         logSkip(
           `${new Date(candle.openTime).toISOString()} live order was not fully filled${liveFillProgress(pendingLiveOrder)}; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
         );
-        await syncGoogleSheetsOrderEvent(
+        syncGoogleSheetsOrderEvent(
           "ORDER_NOT_FILLED",
           pendingTrade,
           pendingLiveOrder,
           "Order was not fully filled by candle close"
         );
         strategy.recordTradeResult(strategyOnlyTrade, candle);
+        processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);
         pendingTrade = null;
         pendingLiveOrder = null;
         clearPendingEarlyEntryTracking();
+        clearPersistedPendingLiveTradeState();
         finishProcessedClosedCandle(candle);
         continue;
       }
@@ -659,15 +854,17 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
       const resolvedTrade = resolvePaperTrade(pendingTrade, candle);
       logResult(resolvedTrade);
       writeLocalTradeLogs(resolvedTrade, pendingLiveOrder);
-      await syncGoogleSheetsTrade(resolvedTrade, pendingLiveOrder);
+      syncGoogleSheetsTrade(resolvedTrade, pendingLiveOrder);
       if (liveExecutor && pendingLiveOrder) {
-        await syncGoogleSheetsOrderEvent("ORDER_FILLED", pendingTrade, pendingLiveOrder, "Order was fully filled and logged as a trade");
+        syncGoogleSheetsOrderEvent("ORDER_FILLED", pendingTrade, pendingLiveOrder, "Order was fully filled and logged as a trade");
       }
       strategy.recordTradeResult(resolvedTrade, candle);
+      processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);
       riskManager.recordResolvedTrade(resolvedTrade);
       pendingTrade = null;
       pendingLiveOrder = null;
       clearPendingEarlyEntryTracking();
+      clearPersistedPendingLiveTradeState();
     } else {
       strategy.processClosedCandleWithoutTrade(candle);
     }
@@ -695,8 +892,15 @@ async function tick(): Promise<void> {
   }
 
   if (!initialized) {
-    warmUpStrategy(closedCandles);
+    const pendingTradeForWarmup = pendingTrade;
+    const warmupCandles = pendingTradeForWarmup
+      ? closedCandles.filter((candle) => candle.openTime < pendingTradeForWarmup.candleOpenTime)
+      : closedCandles;
+    warmUpStrategy(warmupCandles);
     skipStartupCandle(currentCandle);
+    if (pendingTrade) {
+      await processNewClosedCandles(closedCandles);
+    }
     return;
   } else {
     await processNewClosedCandles(closedCandles);
@@ -759,6 +963,7 @@ async function main(): Promise<void> {
   initializeLocalCsvLogs();
   logStartup(config);
   await initializeGoogleSheets();
+  await recoverPersistedPendingLiveTrade();
 
   while (!shuttingDown) {
     try {
@@ -767,12 +972,14 @@ async function main(): Promise<void> {
       logError(error);
       if (runOnce) {
         process.exitCode = 1;
+        await drainGoogleSheetsQueue(5_000);
         closePolymarketChainlinkCandleSources();
         return;
       }
     }
 
     if (runOnce) {
+      await drainGoogleSheetsQueue(5_000);
       closePolymarketChainlinkCandleSources();
       return;
     }
@@ -781,6 +988,7 @@ async function main(): Promise<void> {
   }
 
   await cancelPendingLiveOrder();
+  await drainGoogleSheetsQueue(5_000);
   closePolymarketChainlinkCandleSources();
 }
 

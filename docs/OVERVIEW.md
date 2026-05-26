@@ -43,8 +43,9 @@ Live trading is not just a switch. It requires explicit guards:
 
 - Live mode must be selected.
 - Live trading must be enabled.
-- A confirmation phrase must match exactly.
 - Wallet and RPC settings must be present.
+- The live price source must be Polymarket/Chainlink.
+- Local CSV audit logging must be enabled.
 - Entry, stake, daily loss, trade count, and live-window limits must pass.
 
 This makes accidental live execution harder. The bot is intended to be run carefully, with small stakes, limited wallet funding, and dry-run verification before real orders.

@@ -16,6 +16,8 @@ export type PriceSource = "binance" | "polymarket_chainlink";
 
 export type OrderEventType = "ORDER_PLACED" | "ORDER_FILLED" | "FINAL_CHECK_CANCELED" | "ORDER_NOT_FILLED";
 
+export type LiveFillStatus = "known" | "unknown";
+
 export type Candle = {
   openTime: number;
   closeTime: number;
@@ -90,6 +92,8 @@ export type LiveOrder = {
   response: unknown;
   filled: boolean;
   filledSize?: number;
+  fillStatus: LiveFillStatus;
+  fillError?: string;
   canceled: boolean;
   cancelResponse?: unknown;
 };
