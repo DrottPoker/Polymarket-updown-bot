@@ -340,7 +340,7 @@ This keeps retry state consistent without placing unwanted trades.
 
 `stats.csv` contains aggregate statistics generated from `trades.csv` when `localCsvLoggingEnabled` is `true`.
 
-`order-events.csv` contains local live order lifecycle events when `localCsvLoggingEnabled` is `true`.
+`order-events.csv` contains local live order lifecycle events when `localCsvLoggingEnabled` is `true`. `ORDER_NOT_FILLED` rows include the missed full-size candle result when it is known.
 
 `bot-state.json` contains restart recovery state for pending live orders and risk counters.
 

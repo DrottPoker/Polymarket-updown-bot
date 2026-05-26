@@ -383,11 +383,14 @@ function finalizePendingSettlement(candle: Candle, settlement: PendingSettlement
     writeLocalTradeLogs(resolvedTrade, settlement.realizedLiveOrder);
     syncGoogleSheetsTrade(resolvedTrade, settlement.realizedLiveOrder);
     if (settlement.orderEventType) {
+      const missedTrade =
+        settlement.orderEventType === "ORDER_NOT_FILLED" ? resolvePaperTrade(settlement.trade, candle) : undefined;
       syncGoogleSheetsOrderEvent(
         settlement.orderEventType,
         settlement.trade,
         settlement.realizedLiveOrder,
-        settlement.orderEventDetail
+        settlement.orderEventDetail,
+        missedTrade
       );
     }
     riskManager.recordResolvedTrade(resolvedTrade);
@@ -492,13 +495,15 @@ function syncGoogleSheetsOrderEvent(
   eventType: OrderEventType,
   trade: PaperTrade,
   liveOrder?: LiveOrder | null,
-  detail?: string
+  detail?: string,
+  missedTrade?: ResolvedPaperTrade | null
 ): void {
   const event: OrderEvent = {
     eventTime: Date.now(),
     eventType,
     trade,
     liveOrder,
+    missedTrade,
     detail,
   };
 
@@ -911,7 +916,8 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
               "ORDER_NOT_FILLED",
               pendingTrade,
               pendingLiveOrder,
-              "Order was partially filled by candle close and logged proportionally"
+              "Order was partially filled by candle close and logged proportionally",
+              strategyOnlyTrade
             );
             riskManager.recordResolvedTrade(realizedTrade);
           }
@@ -942,7 +948,8 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
           "ORDER_NOT_FILLED",
           pendingTrade,
           pendingLiveOrder,
-          "Order was not fully filled by candle close"
+          "Order was not fully filled by candle close",
+          strategyOnlyTrade
         );
         strategy.recordTradeResult(strategyOnlyTrade, candle);
         processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);

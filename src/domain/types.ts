@@ -103,5 +103,6 @@ export type OrderEvent = {
   eventType: OrderEventType;
   trade: PaperTrade;
   liveOrder?: LiveOrder | null;
+  missedTrade?: ResolvedPaperTrade | null;
   detail?: string;
 };

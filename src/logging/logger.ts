@@ -69,6 +69,9 @@ export const orderEventCsvColumns = [
   "live_price",
   "live_size",
   "canceled",
+  "missed_result",
+  "missed_pnl",
+  "missed_close",
 ];
 export const orderEventCsvHeader = orderEventCsvColumns.join(",");
 
@@ -346,7 +349,16 @@ export function ensureOrderEventsCsvLog(logFile: string): void {
   }
 
   if (lines[0] !== orderEventCsvHeader) {
-    throw new Error(`Cannot use ${logFile}; order event CSV header does not match the current schema`);
+    const existingColumns = parseCsvLine(lines[0]);
+    const unknownColumns = existingColumns.filter((column) => !orderEventCsvColumns.includes(column));
+    if (unknownColumns.length > 0) {
+      throw new Error(`Cannot migrate ${logFile}; unknown CSV columns: ${unknownColumns.join(", ")}`);
+    }
+
+    const migratedRows = readCsvRows(logFile).map((row) =>
+      orderEventCsvColumns.map((column) => csvEscape(row[column] ?? "")).join(",")
+    );
+    writeFileSync(absolutePath, `${orderEventCsvHeader}\n${migratedRows.join("\n")}${migratedRows.length > 0 ? "\n" : ""}`, "utf8");
   }
 }
 
@@ -578,6 +590,9 @@ export function buildOrderEventRow(event: OrderEvent): Array<string | number | b
     event.liveOrder?.price,
     event.liveOrder?.size,
     event.liveOrder?.canceled,
+    event.missedTrade?.result,
+    event.missedTrade ? Number(event.missedTrade.pnl.toFixed(8)) : undefined,
+    event.missedTrade?.close,
   ];
 }
 
