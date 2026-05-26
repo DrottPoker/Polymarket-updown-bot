@@ -1,5 +1,13 @@
 import { Chain, ClobClient, OrderType, Side, SignatureTypeV2 } from "@polymarket/clob-client-v2";
-import type { ApiKeyCreds, FeeDetails, OpenOrder, OrderResponse, TickSize, Trade } from "@polymarket/clob-client-v2";
+import type {
+  ApiKeyCreds,
+  FeeDetails,
+  OpenOrder,
+  OrderBookSummary,
+  OrderResponse,
+  TickSize,
+  Trade,
+} from "@polymarket/clob-client-v2";
 import { createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { AppConfig } from "../config/appConfig";
@@ -14,6 +22,13 @@ type LiveFillDetails = {
 };
 
 type FillRole = "TAKER" | "MAKER";
+
+type LiveEntrySelection = {
+  requestedPrice: number;
+  price: number;
+  size: number;
+  bestAskAtPost?: number;
+};
 
 function toPrivateKey(value: string): `0x${string}` {
   if (!value.startsWith("0x")) {
@@ -67,6 +82,15 @@ function getOrderStatus(response: unknown): string | undefined {
 
   const maybeOrder = response as Partial<OrderResponse>;
   return maybeOrder.status;
+}
+
+function getOrderError(response: unknown): string | undefined {
+  if (!response || typeof response !== "object") {
+    return undefined;
+  }
+
+  const maybeOrder = response as Partial<OrderResponse>;
+  return maybeOrder.errorMsg;
 }
 
 function parsePositiveNumber(value: string | number | undefined): number {
@@ -192,6 +216,50 @@ function assertPriceMatchesTick(price: number, tickSize: TickSize): void {
   }
 }
 
+function tickDecimals(tickSize: TickSize): number {
+  const [, decimals = ""] = tickSize.split(".");
+  return decimals.length;
+}
+
+function normalizePrice(price: number, tickSize: TickSize): number {
+  return Number(price.toFixed(tickDecimals(tickSize)));
+}
+
+function roundDownToTick(price: number, tickSize: TickSize): number {
+  const tick = Number(tickSize);
+  return normalizePrice(Math.floor((price + 1e-12) / tick) * tick, tickSize);
+}
+
+function roundUpToTick(price: number, tickSize: TickSize): number {
+  const tick = Number(tickSize);
+  return normalizePrice(Math.ceil((price - 1e-12) / tick) * tick, tickSize);
+}
+
+function decrementByTick(price: number, tickSize: TickSize): number {
+  return normalizePrice(price - Number(tickSize), tickSize);
+}
+
+function bestAskPrice(book: OrderBookSummary): number | undefined {
+  const asks = book.asks.map((ask) => parsePositiveNumber(ask.price)).filter((price) => price > 0);
+  return asks.length > 0 ? Math.min(...asks) : undefined;
+}
+
+function isBuyMarketable(price: number, bestAsk: number | undefined): boolean {
+  return bestAsk !== undefined && price + 1e-12 >= bestAsk;
+}
+
+function formatCents(price: number): string {
+  return `${normalizePrice(price * 100, "0.0001").toString()}c`;
+}
+
+function liveSizeForStake(stakeUsd: number, price: number): number {
+  if (price <= 0) {
+    throw new Error("Live entry price must be greater than zero");
+  }
+
+  return stakeUsd / price;
+}
+
 export class PolymarketLiveExecutor {
   private clientPromise: Promise<ClobClient> | null = null;
   private readonly feeDetailsByConditionId = new Map<string, FeeDetails | null>();
@@ -215,12 +283,11 @@ export class PolymarketLiveExecutor {
 
     const book = await this.publicClient.getOrderBook(market.tokenId);
     const tickSize = getTickSize(book.tick_size);
-    const price = trade.entryCents / 100;
-    assertPriceMatchesTick(price, tickSize);
+    const entrySelection = this.selectLiveEntry(trade, book, tickSize);
     const minOrderSize = Number(book.min_order_size);
 
-    if (Number.isFinite(minOrderSize) && trade.shares < minOrderSize) {
-      throw new Error(`Order size ${trade.shares.toFixed(4)} is below market minimum ${minOrderSize}`);
+    if (Number.isFinite(minOrderSize) && entrySelection.size < minOrderSize) {
+      throw new Error(`Order size ${entrySelection.size.toFixed(4)} is below market minimum ${minOrderSize}`);
     }
 
     return {
@@ -229,21 +296,25 @@ export class PolymarketLiveExecutor {
       conditionId: market.conditionId,
       tokenId: market.tokenId,
       outcome: market.outcome,
-      price,
-      size: trade.shares,
+      price: entrySelection.price,
+      size: entrySelection.size,
       tickSize,
       minOrderSize: book.min_order_size,
       negRisk: book.neg_risk,
+      postOnly: this.config.livePostOnlyEntryEnabled,
+      requestedPrice: entrySelection.requestedPrice,
+      bestAskAtPost: entrySelection.bestAskAtPost,
       status: "DRY_RUN",
       postedAt: Date.now(),
       cancelAt: trade.candleOpenTime + this.config.tradeWindowSeconds * 1000,
       response: {
         wouldPostOrder: {
           tokenID: market.tokenId,
-          price,
+          price: entrySelection.price,
           side: Side.BUY,
-          size: trade.shares,
+          size: entrySelection.size,
           orderType: OrderType.GTC,
+          postOnly: this.config.livePostOnlyEntryEnabled,
           options: {
             tickSize,
             negRisk: book.neg_risk,
@@ -267,31 +338,34 @@ export class PolymarketLiveExecutor {
 
     const book = await this.publicClient.getOrderBook(market.tokenId);
     const tickSize = getTickSize(book.tick_size);
-    const price = trade.entryCents / 100;
-    assertPriceMatchesTick(price, tickSize);
+    const entrySelection = this.selectLiveEntry(trade, book, tickSize);
     const minOrderSize = Number(book.min_order_size);
 
-    if (Number.isFinite(minOrderSize) && trade.shares < minOrderSize) {
-      throw new Error(`Order size ${trade.shares.toFixed(4)} is below market minimum ${minOrderSize}`);
+    if (Number.isFinite(minOrderSize) && entrySelection.size < minOrderSize) {
+      throw new Error(`Order size ${entrySelection.size.toFixed(4)} is below market minimum ${minOrderSize}`);
     }
 
     const client = await this.getTradingClient();
     const response = await client.createAndPostOrder(
       {
         tokenID: market.tokenId,
-        price,
+        price: entrySelection.price,
         side: Side.BUY,
-        size: trade.shares,
+        size: entrySelection.size,
       },
       {
         tickSize,
         negRisk: book.neg_risk,
       },
-      OrderType.GTC
+      OrderType.GTC,
+      this.config.livePostOnlyEntryEnabled
     );
     const orderId = getOrderId(response);
     if (!orderId) {
-      throw new Error("Polymarket order response did not include an order id");
+      const error = getOrderError(response);
+      throw new Error(
+        `Polymarket order response did not include an order id${error ? ` (${error})` : ""}`
+      );
     }
 
     return {
@@ -300,11 +374,14 @@ export class PolymarketLiveExecutor {
       conditionId: market.conditionId,
       tokenId: market.tokenId,
       outcome: market.outcome,
-      price,
-      size: trade.shares,
+      price: entrySelection.price,
+      size: entrySelection.size,
       tickSize,
       minOrderSize: book.min_order_size,
       negRisk: book.neg_risk,
+      postOnly: this.config.livePostOnlyEntryEnabled,
+      requestedPrice: entrySelection.requestedPrice,
+      bestAskAtPost: entrySelection.bestAskAtPost,
       orderId,
       status: getOrderStatus(response),
       postedAt: Date.now(),
@@ -379,6 +456,44 @@ export class PolymarketLiveExecutor {
         fillError: errorMessage(error),
       };
     }
+  }
+
+  private selectLiveEntry(trade: PaperTrade, book: OrderBookSummary, tickSize: TickSize): LiveEntrySelection {
+    const requestedPrice = trade.entryCents / 100;
+    assertPriceMatchesTick(requestedPrice, tickSize);
+
+    if (!this.config.livePostOnlyEntryEnabled) {
+      return {
+        requestedPrice,
+        price: requestedPrice,
+        size: trade.shares,
+        bestAskAtPost: bestAskPrice(book),
+      };
+    }
+
+    const bestAskAtPost = bestAskPrice(book);
+    const minPrice = roundUpToTick(this.config.minPostOnlyEntryCents / 100, tickSize);
+    let candidatePrice = roundDownToTick(requestedPrice, tickSize);
+
+    while (candidatePrice + 1e-12 >= minPrice) {
+      if (!isBuyMarketable(candidatePrice, bestAskAtPost)) {
+        return {
+          requestedPrice,
+          price: candidatePrice,
+          size: liveSizeForStake(trade.stakeUsd, candidatePrice),
+          bestAskAtPost,
+        };
+      }
+
+      candidatePrice = decrementByTick(candidatePrice, tickSize);
+    }
+
+    const bestAskLabel = bestAskAtPost === undefined ? "none" : formatCents(bestAskAtPost);
+    throw new Error(
+      `No non-marketable post-only BUY price available from ${formatCents(requestedPrice)} down to ${formatCents(
+        minPrice
+      )}; best ask is ${bestAskLabel}`
+    );
   }
 
   private async getTradingClient(): Promise<ClobClient> {

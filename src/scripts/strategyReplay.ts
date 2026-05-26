@@ -135,6 +135,8 @@ const defaultConfig: AppConfig = {
   maxTradesPerDay: 50,
   maxLiveTradeWindowSeconds: 300,
   liveFullFillToleranceShares: 0.01,
+  livePostOnlyEntryEnabled: true,
+  minPostOnlyEntryCents: 1,
   earlyEntryEnabled: true,
   earlyEntryPrimarySecondsBeforeClose: 15,
   earlyEntryPrimaryMinMovePct: 0.06,

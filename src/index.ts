@@ -262,6 +262,22 @@ function hasPartialLiveFill(order: LiveOrder | null): boolean {
   return Boolean(order && order.fillStatus !== "unknown" && !order.filled && liveFilledSize(order) > 0);
 }
 
+function formatLivePrice(price: number | undefined): string {
+  return price === undefined ? "unknown" : `${(price * 100).toFixed(2)}c`;
+}
+
+function liveOrderEntryDetail(order: LiveOrder): string {
+  const mode = order.postOnly === true ? "post-only maker entry" : "limit entry";
+  const selected = formatLivePrice(order.price);
+  if (order.requestedPrice !== undefined && Math.abs(order.requestedPrice - order.price) > 1e-9) {
+    return `${mode}; selected ${selected} from requested ${formatLivePrice(
+      order.requestedPrice
+    )}; best ask at post was ${formatLivePrice(order.bestAskAtPost)}`;
+  }
+
+  return `${mode}; selected ${selected}; best ask at post was ${formatLivePrice(order.bestAskAtPost)}`;
+}
+
 function liveOrderForFilledPortion(order: LiveOrder): LiveOrder {
   const filledSize = liveFilledSize(order);
   return {
@@ -743,7 +759,7 @@ async function openTrade(trade: PaperTrade, sourceCandleOpenTime: number): Promi
       riskManager.recordOrderPlaced(trade.signalTime);
       persistRuntimeState();
       logLiveOrder(pendingLiveOrder);
-      syncGoogleSheetsOrderEvent("ORDER_PLACED", trade, pendingLiveOrder);
+      syncGoogleSheetsOrderEvent("ORDER_PLACED", trade, pendingLiveOrder, liveOrderEntryDetail(pendingLiveOrder));
       return true;
     } catch (error) {
       logError(error);
@@ -1038,12 +1054,13 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         logSkip(
           `${new Date(candle.openTime).toISOString()} live order was not fully filled${liveFillProgress(pendingLiveOrder)}; strategy state updates as hypothetical ${strategyOnlyTrade.result}`
         );
+        const missedTrade = resolvePaperTrade(resizeTradeToUnfilledLiveRemainder(pendingTrade, pendingLiveOrder), candle);
         syncGoogleSheetsOrderEvent(
           "ORDER_NOT_FILLED",
           pendingTrade,
           pendingLiveOrder,
           "Order was not fully filled by candle close",
-          strategyOnlyTrade
+          missedTrade
         );
         strategy.recordTradeResult(strategyOnlyTrade, candle);
         processedTradeInputsByOpenTime.set(candle.openTime, pendingTrade);

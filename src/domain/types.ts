@@ -86,6 +86,9 @@ export type LiveOrder = {
   tickSize: string;
   minOrderSize: string;
   negRisk: boolean;
+  postOnly?: boolean;
+  requestedPrice?: number;
+  bestAskAtPost?: number;
   orderId?: string;
   status?: string;
   postedAt: number;

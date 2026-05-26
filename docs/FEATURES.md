@@ -240,7 +240,7 @@ It then reads Gamma metadata and resolves the correct `Up` or `Down` token id.
 
 ## Limit Order Placement
 
-Live mode posts GTC limit BUY orders at `entryCents`.
+Live mode posts GTC limit BUY orders. With `livePostOnlyEntryEnabled=true`, those orders are post-only maker orders. The bot starts at `entryCents`; if that BUY would cross the current best ask, it steps down by the market tick until the price is no longer marketable or `minPostOnlyEntryCents` is reached.
 
 Before posting, the bot checks:
 
@@ -251,11 +251,13 @@ Before posting, the bot checks:
 - Order size is at least the market minimum.
 - Runtime risk limits allow the trade.
 
-The bot calculates shares from:
+The bot keeps the configured dollar stake and calculates live shares from the selected order price:
 
 ```text
-stakeUsd / (entryCents / 100)
+stakeUsd / selectedLivePrice
 ```
+
+If no non-marketable post-only price exists at or above `minPostOnlyEntryCents`, no order is placed and the signal does not update live retry state.
 
 ## Order Cancel And Fill Tracking
 
@@ -284,7 +286,9 @@ Configured with:
   "maxDailyLossUsd": 50,
   "maxTradesPerDay": 50,
   "maxLiveTradeWindowSeconds": 300,
-  "liveFullFillToleranceShares": 0.01
+  "liveFullFillToleranceShares": 0.01,
+  "livePostOnlyEntryEnabled": true,
+  "minPostOnlyEntryCents": 1
 }
 ```
 

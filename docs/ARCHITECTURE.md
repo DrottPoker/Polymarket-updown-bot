@@ -141,6 +141,7 @@ It handles:
 - Market tradability checks.
 - Order book metadata checks.
 - Tick size handling.
+- Post-only maker entry price selection.
 - Minimum order size checks.
 - CLOB credential derivation or configured credential usage.
 - GTC limit BUY order creation.

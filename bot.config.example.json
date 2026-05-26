@@ -48,5 +48,7 @@
   "maxDailyLossUsd": 50,
   "maxTradesPerDay": 50,
   "maxLiveTradeWindowSeconds": 300,
-  "liveFullFillToleranceShares": 0.01
+  "liveFullFillToleranceShares": 0.01,
+  "livePostOnlyEntryEnabled": true,
+  "minPostOnlyEntryCents": 1
 }

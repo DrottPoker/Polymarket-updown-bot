@@ -404,6 +404,10 @@ export function logStartup(config: AppConfig): void {
     console.log(`max trades/day: ${config.maxTradesPerDay}`);
     console.log(`max live window: ${config.maxLiveTradeWindowSeconds}s`);
     console.log(`live full-fill tolerance: ${config.liveFullFillToleranceShares} shares`);
+    console.log(`live post-only entry: ${config.livePostOnlyEntryEnabled}`);
+    if (config.livePostOnlyEntryEnabled) {
+      console.log(`min post-only entry: ${config.minPostOnlyEntryCents}c`);
+    }
   }
   console.log(`poll: ${config.pollMs}ms`);
   console.log(`local csv logging: ${config.localCsvLoggingEnabled}`);
@@ -486,6 +490,13 @@ export function logLiveOrder(order: LiveOrder): void {
   console.log(`token: ${order.tokenId}`);
   console.log(`price: ${order.price.toFixed(4)}`);
   console.log(`size: ${order.size.toFixed(4)}`);
+  console.log(`post only: ${order.postOnly === true}`);
+  if (order.requestedPrice !== undefined && Math.abs(order.requestedPrice - order.price) > 1e-9) {
+    console.log(`requested price: ${order.requestedPrice.toFixed(4)}`);
+  }
+  if (order.bestAskAtPost !== undefined) {
+    console.log(`best ask at post: ${order.bestAskAtPost.toFixed(4)}`);
+  }
   console.log(`tick size: ${order.tickSize}`);
   console.log(`min order size: ${order.minOrderSize}`);
   console.log(`neg risk: ${order.negRisk}`);
@@ -504,6 +515,13 @@ export function logLiveDryRun(order: LiveOrder): void {
   console.log(`side: BUY`);
   console.log(`price: ${order.price.toFixed(4)}`);
   console.log(`size: ${order.size.toFixed(4)}`);
+  console.log(`post only: ${order.postOnly === true}`);
+  if (order.requestedPrice !== undefined && Math.abs(order.requestedPrice - order.price) > 1e-9) {
+    console.log(`requested price: ${order.requestedPrice.toFixed(4)}`);
+  }
+  if (order.bestAskAtPost !== undefined) {
+    console.log(`best ask at post: ${order.bestAskAtPost.toFixed(4)}`);
+  }
   console.log(`tick size: ${order.tickSize}`);
   console.log(`min order size: ${order.minOrderSize}`);
   console.log(`neg risk: ${order.negRisk}`);

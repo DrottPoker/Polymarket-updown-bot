@@ -38,6 +38,8 @@ type BotConfigFile = Partial<{
   maxTradesPerDay: number;
   maxLiveTradeWindowSeconds: number;
   liveFullFillToleranceShares: number;
+  livePostOnlyEntryEnabled: boolean;
+  minPostOnlyEntryCents: number;
   earlyEntryEnabled: boolean;
   earlyEntryPrimarySecondsBeforeClose: number;
   earlyEntryPrimaryMinMovePct: number;
@@ -99,6 +101,8 @@ export type AppConfig = {
   maxTradesPerDay: number;
   maxLiveTradeWindowSeconds: number;
   liveFullFillToleranceShares: number;
+  livePostOnlyEntryEnabled: boolean;
+  minPostOnlyEntryCents: number;
   earlyEntryEnabled: boolean;
   earlyEntryPrimarySecondsBeforeClose: number;
   earlyEntryPrimaryMinMovePct: number;
@@ -268,6 +272,8 @@ export function loadConfig(): AppConfig {
     maxTradesPerDay: readNumber(configFile, "maxTradesPerDay", 20),
     maxLiveTradeWindowSeconds: readNumber(configFile, "maxLiveTradeWindowSeconds", 60),
     liveFullFillToleranceShares: readNumber(configFile, "liveFullFillToleranceShares", 0.01),
+    livePostOnlyEntryEnabled: readBoolean(configFile, "livePostOnlyEntryEnabled", true),
+    minPostOnlyEntryCents: readNumber(configFile, "minPostOnlyEntryCents", 1),
     earlyEntryEnabled: readBoolean(configFile, "earlyEntryEnabled", false),
     earlyEntryPrimarySecondsBeforeClose: readNumber(configFile, "earlyEntryPrimarySecondsBeforeClose", 15),
     earlyEntryPrimaryMinMovePct: readNumber(configFile, "earlyEntryPrimaryMinMovePct", 0.05),
@@ -363,6 +369,16 @@ function validateConfig(config: AppConfig): void {
 
   if (config.liveFullFillToleranceShares < 0 || config.liveFullFillToleranceShares > 1) {
     throw new Error("liveFullFillToleranceShares must be between 0 and 1");
+  }
+
+  if (config.minPostOnlyEntryCents <= 0 || config.minPostOnlyEntryCents >= 100) {
+    throw new Error("minPostOnlyEntryCents must be greater than 0 and less than 100");
+  }
+
+  if (config.minPostOnlyEntryCents > config.entryCents) {
+    throw new Error(
+      `minPostOnlyEntryCents (${config.minPostOnlyEntryCents}) must not exceed entryCents (${config.entryCents})`
+    );
   }
 
   if (config.earlyEntryPrimarySecondsBeforeClose <= 0) {
