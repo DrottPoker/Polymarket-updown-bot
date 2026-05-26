@@ -1,5 +1,5 @@
 import { Chain, ClobClient, OrderType, Side, SignatureTypeV2 } from "@polymarket/clob-client-v2";
-import type { ApiKeyCreds, OpenOrder, OrderResponse, TickSize, Trade } from "@polymarket/clob-client-v2";
+import type { ApiKeyCreds, FeeDetails, OpenOrder, OrderResponse, TickSize, Trade } from "@polymarket/clob-client-v2";
 import { createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { AppConfig } from "../config/appConfig";
@@ -7,6 +7,13 @@ import { LiveOrder, PaperTrade } from "../domain/types";
 import { findPolymarketMarketForTrade } from "./marketDiscovery";
 
 type OrderDetails = Pick<OpenOrder, "status" | "associate_trades">;
+
+type LiveFillDetails = {
+  filledSize: number;
+  feeUsd: number;
+};
+
+type FillRole = "TAKER" | "MAKER";
 
 function toPrivateKey(value: string): `0x${string}` {
   if (!value.startsWith("0x")) {
@@ -113,6 +120,53 @@ function tradeFilledSizeForOrder(order: LiveOrder, trade: Trade): number {
     .reduce((filledSize, makerOrder) => filledSize + parsePositiveNumber(makerOrder.matched_amount), 0);
 }
 
+function calculateFillFeeUsd(fillSize: number, price: number, feeDetails: FeeDetails | null, role: FillRole): number {
+  if (!feeDetails || fillSize <= 0 || price <= 0 || price >= 1) {
+    return 0;
+  }
+
+  if (role === "MAKER" && feeDetails.to === true) {
+    return 0;
+  }
+
+  const rate = Number(feeDetails.r ?? 0);
+  const exponent = Number(feeDetails.e ?? 1);
+  if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(exponent) || exponent < 0) {
+    return 0;
+  }
+
+  return fillSize * rate * Math.pow(price * (1 - price), exponent);
+}
+
+function tradeFeeForOrder(order: LiveOrder, trade: Trade, feeDetails: FeeDetails | null): number {
+  if (!tradeCanCountAsFill(trade)) {
+    return 0;
+  }
+
+  if (trade.taker_order_id === order.orderId) {
+    return calculateFillFeeUsd(
+      parsePositiveNumber(trade.size),
+      parsePositiveNumber(trade.price),
+      feeDetails,
+      "TAKER"
+    );
+  }
+
+  return (trade.maker_orders ?? [])
+    .filter((makerOrder) => makerOrder.order_id === order.orderId)
+    .reduce(
+      (feeUsd, makerOrder) =>
+        feeUsd +
+        calculateFillFeeUsd(
+          parsePositiveNumber(makerOrder.matched_amount),
+          parsePositiveNumber(makerOrder.price),
+          feeDetails,
+          "MAKER"
+        ),
+      0
+    );
+}
+
 function normalizeFilledSize(order: LiveOrder, filledSize: number, toleranceShares: number): number {
   const boundedFilledSize = Math.min(Math.max(filledSize, 0), order.size);
   return order.size - boundedFilledSize <= toleranceShares ? order.size : boundedFilledSize;
@@ -140,6 +194,7 @@ function assertPriceMatchesTick(price: number, tickSize: TickSize): void {
 
 export class PolymarketLiveExecutor {
   private clientPromise: Promise<ClobClient> | null = null;
+  private readonly feeDetailsByConditionId = new Map<string, FeeDetails | null>();
   private readonly publicClient: ClobClient;
 
   constructor(private readonly config: AppConfig) {
@@ -301,17 +356,19 @@ export class PolymarketLiveExecutor {
   }
 
   async refreshFillStatus(order: LiveOrder): Promise<LiveOrder> {
-    if (order.filled || !order.orderId) {
+    if ((order.filled && order.feeUsd !== undefined) || !order.orderId) {
       return order;
     }
 
     try {
-      const filledSize = await this.getFilledSize(order);
+      const fillDetails = await this.getFillDetails(order);
+      const filledSize = fillDetails.filledSize;
       const normalizedFilledSize = normalizeFilledSize(order, filledSize, this.config.liveFullFillToleranceShares);
       return {
         ...order,
         filled: isFullyFilled(order, filledSize, this.config.liveFullFillToleranceShares),
         filledSize: normalizedFilledSize,
+        feeUsd: fillDetails.feeUsd,
         fillStatus: "known",
         fillError: undefined,
       };
@@ -375,12 +432,27 @@ export class PolymarketLiveExecutor {
     };
   }
 
-  private async getFilledSize(order: LiveOrder): Promise<number> {
+  private async getFeeDetails(conditionId: string): Promise<FeeDetails | null> {
+    if (this.feeDetailsByConditionId.has(conditionId)) {
+      return this.feeDetailsByConditionId.get(conditionId) ?? null;
+    }
+
+    const marketInfo = await this.publicClient.getClobMarketInfo(conditionId);
+    const feeDetails = marketInfo.fd ?? null;
+    this.feeDetailsByConditionId.set(conditionId, feeDetails);
+    return feeDetails;
+  }
+
+  private async getFillDetails(order: LiveOrder): Promise<LiveFillDetails> {
     if (!order.orderId) {
-      return 0;
+      return {
+        filledSize: 0,
+        feeUsd: 0,
+      };
     }
 
     const client = await this.getTradingClient();
+    const feeDetails = await this.getFeeDetails(order.conditionId);
     const tradeIds = new Set(responseTradeIds(order.response));
     try {
       const orderDetails = (await client.getOrder(order.orderId)) as OrderDetails | null;
@@ -402,9 +474,15 @@ export class PolymarketLiveExecutor {
       trades.forEach((trade) => tradesById.set(trade.id, trade));
     }
 
-    return Array.from(tradesById.values()).reduce(
-      (filledSize, trade) => filledSize + tradeFilledSizeForOrder(order, trade),
-      0
+    return Array.from(tradesById.values()).reduce<LiveFillDetails>(
+      (details, trade) => ({
+        filledSize: details.filledSize + tradeFilledSizeForOrder(order, trade),
+        feeUsd: details.feeUsd + tradeFeeForOrder(order, trade, feeDetails),
+      }),
+      {
+        filledSize: 0,
+        feeUsd: 0,
+      }
     );
   }
 

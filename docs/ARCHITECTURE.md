@@ -232,6 +232,8 @@ It handles:
 
 Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab. The main loop queues Google Sheets writes outside the live order-management path. When local CSV logging is enabled, startup and failed-write recovery reconcile missing local CSV rows into the configured Google Sheets `Trades` and `Order Events` tabs. Startup reconciliation skips bulk backfill when both raw Google Sheets tabs are empty, so an intentional remote reset stays empty.
 
+Live fill accounting keeps Polymarket CLOB fees on the `LiveOrder`. The live executor derives filled size and fee from confirmed CLOB trades and the market fee parameters, then `paperBroker` subtracts that fee from realized live PnL before rows are written to local CSV or Google Sheets.
+
 ## Runtime Flow
 
 ```text
@@ -341,7 +343,7 @@ This keeps retry state consistent without placing unwanted trades.
 
 `stats.csv` contains aggregate statistics generated from `trades.csv` when `localCsvLoggingEnabled` is `true`.
 
-`order-events.csv` contains local live order lifecycle events when `localCsvLoggingEnabled` is `true`. `ORDER_NOT_FILLED` rows include the missed full-size candle result when it is known.
+`order-events.csv` contains local live order lifecycle events when `localCsvLoggingEnabled` is `true`. `ORDER_NOT_FILLED` rows include the missed candle result when it is known. For partial fills, the missed result is sized only to the unfilled remainder.
 
 `bot-state.json` contains restart recovery state for pending live orders and risk counters.
 

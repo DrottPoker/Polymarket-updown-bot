@@ -26,7 +26,12 @@ import { fetchCandles } from "./marketData/candles";
 import { closePolymarketChainlinkCandleSources } from "./marketData/polymarketChainlinkCandles";
 import { PolymarketLiveExecutor } from "./polymarket/liveExecutor";
 import { PendingLiveTradeState, PendingSettlementState, RuntimeState, RuntimeStateStore } from "./state/runtimeStateStore";
-import { createPaperTrade, resizeTradeToLiveFill, resolvePaperTrade } from "./trading/paperBroker";
+import {
+  createPaperTrade,
+  resizeTradeToLiveFill,
+  resizeTradeToUnfilledLiveRemainder,
+  resolvePaperTrade,
+} from "./trading/paperBroker";
 import { RuntimeRiskManager } from "./trading/riskManager";
 import {
   getEarlyEntryStages as buildEarlyEntryStages,
@@ -268,6 +273,15 @@ function liveOrderForFilledPortion(order: LiveOrder): LiveOrder {
   };
 }
 
+function liveOrderForPartialOrderEvent(order: LiveOrder): LiveOrder {
+  return {
+    ...order,
+    filledSize: liveFilledSize(order),
+    filled: false,
+    status: "partial",
+  };
+}
+
 function clockTimeToMinutes(value: string): number {
   const [hours, minutes] = value.split(":").map(Number);
   return hours * 60 + minutes;
@@ -402,6 +416,53 @@ function processOfficialClosedCandleCorrections(closedCandles: Candle[]): void {
   }
 }
 
+function liveOrderForSettlementOrderEvent(settlement: PendingSettlementState): LiveOrder | null | undefined {
+  if (settlement.orderEventLiveOrder) {
+    return settlement.orderEventLiveOrder;
+  }
+
+  if (
+    settlement.orderEventType === "ORDER_NOT_FILLED" &&
+    settlement.realizedLiveOrder?.status === "partial" &&
+    settlement.realizedLiveOrder.size < settlement.trade.shares
+  ) {
+    return {
+      ...settlement.realizedLiveOrder,
+      filled: false,
+      filledSize: settlement.realizedLiveOrder.size,
+      size: settlement.trade.shares,
+    };
+  }
+
+  return settlement.realizedLiveOrder;
+}
+
+function resolveMissedSettlementTrade(settlement: PendingSettlementState, candle: Candle): ResolvedPaperTrade | undefined {
+  if (settlement.orderEventType !== "ORDER_NOT_FILLED") {
+    return undefined;
+  }
+
+  if (settlement.missedTrade) {
+    return resolvePaperTrade(settlement.missedTrade, candle);
+  }
+
+  if (
+    settlement.realizedLiveOrder?.status === "partial" &&
+    settlement.realizedLiveOrder.size < settlement.trade.shares
+  ) {
+    return resolvePaperTrade(
+      resizeTradeToUnfilledLiveRemainder(settlement.trade, {
+        ...settlement.realizedLiveOrder,
+        filledSize: settlement.realizedLiveOrder.size,
+        size: settlement.trade.shares,
+      }),
+      candle
+    );
+  }
+
+  return resolvePaperTrade(settlement.trade, candle);
+}
+
 function finalizePendingSettlement(candle: Candle, settlement: PendingSettlementState): void {
   if (settlement.shouldLogTrade) {
     const tradeForLog = settlement.realizedLiveOrder
@@ -412,12 +473,11 @@ function finalizePendingSettlement(candle: Candle, settlement: PendingSettlement
     writeLocalTradeLogs(resolvedTrade, settlement.realizedLiveOrder);
     syncGoogleSheetsTrade(resolvedTrade, settlement.realizedLiveOrder);
     if (settlement.orderEventType) {
-      const missedTrade =
-        settlement.orderEventType === "ORDER_NOT_FILLED" ? resolvePaperTrade(settlement.trade, candle) : undefined;
+      const missedTrade = resolveMissedSettlementTrade(settlement, candle);
       syncGoogleSheetsOrderEvent(
         settlement.orderEventType,
         settlement.trade,
-        settlement.realizedLiveOrder,
+        liveOrderForSettlementOrderEvent(settlement),
         settlement.orderEventDetail,
         missedTrade
       );
@@ -927,6 +987,9 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         const strategyOnlyTrade = resolvePaperTrade(pendingTrade, candle);
         if (hasPartialLiveFill(pendingLiveOrder)) {
           const realizedLiveOrder = liveOrderForFilledPortion(pendingLiveOrder);
+          const partialOrderEvent = liveOrderForPartialOrderEvent(pendingLiveOrder);
+          const missedTradeInput = resizeTradeToUnfilledLiveRemainder(pendingTrade, pendingLiveOrder);
+          const missedTrade = resolvePaperTrade(missedTradeInput, candle);
           if (deferOfficialSettlement) {
             logSkip(
               `${new Date(candle.openTime).toISOString()} live order was partially filled${liveFillProgress(
@@ -944,9 +1007,9 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
             syncGoogleSheetsOrderEvent(
               "ORDER_NOT_FILLED",
               pendingTrade,
-              pendingLiveOrder,
+              partialOrderEvent,
               "Order was partially filled by candle close and logged proportionally",
-              strategyOnlyTrade
+              missedTrade
             );
             riskManager.recordResolvedTrade(realizedTrade);
           }
@@ -959,6 +1022,8 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
               shouldLogTrade: true,
               orderEventType: "ORDER_NOT_FILLED",
               orderEventDetail: "Order was partially filled by candle close and logged proportionally after official settlement",
+              orderEventLiveOrder: partialOrderEvent,
+              missedTrade: missedTradeInput,
             });
           } else {
             pendingTrade = null;
@@ -1009,7 +1074,8 @@ async function processNewClosedCandles(closedCandles: Candle[]): Promise<void> {
         continue;
       }
 
-      const resolvedTrade = resolvePaperTrade(pendingTrade, candle);
+      const tradeForLog = pendingLiveOrder ? resizeTradeToLiveFill(pendingTrade, pendingLiveOrder) : pendingTrade;
+      const resolvedTrade = resolvePaperTrade(tradeForLog, candle);
       logResult(resolvedTrade);
       writeLocalTradeLogs(resolvedTrade, pendingLiveOrder);
       syncGoogleSheetsTrade(resolvedTrade, pendingLiveOrder);

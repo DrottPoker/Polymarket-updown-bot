@@ -131,7 +131,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so they can be analyzed without being counted as filled trades. `ORDER_NOT_FILLED` rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known. Google Sheets errors are logged, but they do not stop the bot from managing trades.
+Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Live CLOB taker fees are deducted from `pnl` and written to the trailing `fee_usd` column so balances use net realized PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so they can be analyzed without being counted as filled trades. `ORDER_NOT_FILLED` rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known. For partial fills, `missed_pnl` is sized only to the unfilled remainder. Google Sheets errors are logged, but they do not stop the bot from managing trades.
 
 Google Sheets writes are queued outside the order-management path and each HTTP request is bounded by `googleSheetsRequestTimeoutMs`. Live order placement and cancellation do not wait on Sheets after the local audit log has been written. When local CSV logging is enabled, the bot reconciles local `trades.csv` and `order-events.csv` into Google Sheets at startup and after a failed Sheets write, appending rows that are missing by order or event key and then refreshing stats. Startup reconciliation does not bulk import old local CSV rows when both raw Google Sheets tabs are empty.
 
@@ -143,7 +143,7 @@ To clear the Google Sheets trade log and restart the dashboard from zero:
 npm run sheets:clear
 ```
 
-This clears only the configured raw log tabs: `Trades` back to A:V headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset.
+This clears only the configured raw log tabs: `Trades` back to A:W headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset.
 
 To reset the bot as if it has not run yet, while keeping settings intact:
 

@@ -51,6 +51,7 @@ export type PaperTrade = {
   stakeUsd: number;
   shares: number;
   maxProfit: number;
+  feeUsd?: number;
   open: number;
   reason: string;
 };
@@ -92,6 +93,7 @@ export type LiveOrder = {
   response: unknown;
   filled: boolean;
   filledSize?: number;
+  feeUsd?: number;
   fillStatus: LiveFillStatus;
   fillError?: string;
   canceled: boolean;

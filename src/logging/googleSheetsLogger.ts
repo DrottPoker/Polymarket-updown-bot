@@ -80,6 +80,7 @@ const numericColumns = new Set([
   "pnl",
   "live_price",
   "live_size",
+  "fee_usd",
   "filled_size",
   "missed_pnl",
   "missed_close",

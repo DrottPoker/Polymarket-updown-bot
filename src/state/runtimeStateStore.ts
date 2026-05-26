@@ -17,6 +17,8 @@ export type PendingSettlementState = {
   shouldLogTrade: boolean;
   orderEventType?: OrderEventType;
   orderEventDetail?: string;
+  orderEventLiveOrder?: LiveOrder | null;
+  missedTrade?: PaperTrade | null;
 };
 
 export type RuntimeState = {

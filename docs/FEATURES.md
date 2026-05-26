@@ -392,7 +392,9 @@ The `Order Events` tab records live execution events that are not trades:
 - `ORDER_PLACED`: a real live limit order was posted.
 - `ORDER_FILLED`: a live order was fully filled and logged as a trade.
 - `FINAL_CHECK_CANCELED`: a primary or secondary early-entry order was canceled by the final one-second validation.
-- `ORDER_NOT_FILLED`: an order reached candle close without being fully filled. If `filled_size` is greater than zero, the filled portion is still logged proportionally in `Trades`. These rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known, so missed fills can be analyzed separately from realized trades.
+- `ORDER_NOT_FILLED`: an order reached candle close without being fully filled. If `filled_size` is greater than zero, the filled portion is still logged proportionally in `Trades`. These rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known, so missed fills can be analyzed separately from realized trades. For partial fills, `missed_pnl` is sized only to the unfilled remainder.
+
+Live CLOB taker fees are deducted from realized `pnl` and written to the trailing `fee_usd` column in `Trades`. Maker fills currently log zero fee unless Polymarket reports a fee-enabled maker structure for the market.
 
 `live_status` is the initial status returned by Polymarket when the order was posted. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
@@ -418,7 +420,7 @@ Run this to show the built-in guide without clearing anything:
 npm run sheets:clear:help
 ```
 
-The clear script only affects the configured raw Google Sheets tabs: `Trades` back to A:V headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. It does not reset `Setup` inputs and does not modify local CSV files.
+The clear script only affects the configured raw Google Sheets tabs: `Trades` back to A:W headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. It does not reset `Setup` inputs and does not modify local CSV files.
 
 For a full fresh-start reset, use:
 

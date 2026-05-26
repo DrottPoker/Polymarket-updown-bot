@@ -26,6 +26,7 @@ export const tradeCsvColumns = [
   "live_filled",
   "live_price",
   "live_size",
+  "fee_usd",
 ];
 export const tradeCsvHeader = tradeCsvColumns.join(",");
 
@@ -202,6 +203,11 @@ export function readCsvRows(file: string): CsvRow[] {
 
 function formatStatNumber(value: number, decimals = 2): number {
   return Number(value.toFixed(decimals));
+}
+
+function formatCurrencyNumber(value: number): number {
+  const rounded = Math.round((Math.abs(value) + Number.EPSILON) * 100) / 100;
+  return Number((value < 0 ? -rounded : rounded).toFixed(2));
 }
 
 function createBucket(scope: string): StatsBucket {
@@ -545,12 +551,12 @@ export function buildTradeResultRow(
     trade.symbol,
     trade.direction,
     trade.entryCents,
-    trade.stakeUsd,
+    formatCurrencyNumber(trade.stakeUsd),
     Number(trade.shares.toFixed(8)),
     trade.open,
     trade.close,
     trade.result,
-    Number(trade.pnl.toFixed(8)),
+    formatCurrencyNumber(trade.pnl),
     trade.reason,
     trade.kind,
     liveOrder?.marketSlug,
@@ -561,6 +567,7 @@ export function buildTradeResultRow(
     liveOrder?.filled,
     liveOrder?.price,
     liveOrder?.size,
+    formatCurrencyNumber(trade.feeUsd ?? liveOrder?.feeUsd ?? 0),
   ];
 }
 
@@ -591,7 +598,7 @@ export function buildOrderEventRow(event: OrderEvent): Array<string | number | b
     event.liveOrder?.size,
     event.liveOrder?.canceled,
     event.missedTrade?.result,
-    event.missedTrade ? Number(event.missedTrade.pnl.toFixed(8)) : undefined,
+    event.missedTrade ? formatCurrencyNumber(event.missedTrade.pnl) : undefined,
     event.missedTrade?.close,
   ];
 }
