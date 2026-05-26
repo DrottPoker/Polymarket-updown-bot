@@ -34,6 +34,7 @@ src/
     liveExecutor.ts
   scripts/
     clearGoogleSheets.ts
+    resetAllState.ts
     strategyReplay.ts
   trading/
     earlyEntryStages.ts

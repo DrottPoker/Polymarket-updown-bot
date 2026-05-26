@@ -203,6 +203,17 @@ npm run sheets:clear:help
 
 This clears only the configured raw log tabs: `Trades` back to A:V headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset. It does not delete or edit local `trades.csv` or `stats.csv`.
 
+To reset the bot as if it has not run yet, while keeping config and spreadsheet setup intact:
+
+```bash
+pm2 stop polymarket-bot
+npm run reset:all:dry-run
+npm run reset:all
+pm2 start polymarket-bot
+```
+
+The full reset clears Google Sheets `Trades`, `Order Events`, and `Stats` when Google Sheets is enabled. It also rewrites local `trades.csv` and `order-events.csv` to header-only files, rebuilds `stats.csv` from the empty trade log, and resets `bot-state.json` so pending orders, pending settlements, and runtime risk counters start from zero. It preserves `bot.config.json`, `.env`, and Google Sheets `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` tabs when present.
+
 ## Strategy Replay Tests
 
 Run deterministic strategy fixtures before changing signal timing, doji handling, retry logic, early-entry logic, or provisional/official candle handling:

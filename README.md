@@ -145,6 +145,20 @@ npm run sheets:clear
 
 This clears only the configured raw log tabs: `Trades` back to A:V headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset.
 
+To reset the bot as if it has not run yet, while keeping settings intact:
+
+```bash
+npm run reset:all
+```
+
+This clears Google Sheets logs when enabled, rewrites local `trades.csv` and `order-events.csv` to header-only files, rebuilds `stats.csv` from the empty trade log, and resets `bot-state.json` so pending orders, pending settlements, and runtime risk counters start from zero. It preserves `bot.config.json`, `.env`, and Google Sheets setup/dashboard tabs. Stop the bot before running it.
+
+To print the full reset plan first:
+
+```bash
+npm run reset:all:dry-run
+```
+
 To print the exact clear targets before changing the spreadsheet:
 
 ```bash

@@ -420,6 +420,14 @@ npm run sheets:clear:help
 
 The clear script only affects the configured raw Google Sheets tabs: `Trades` back to A:V headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. It does not reset `Setup` inputs and does not modify local CSV files.
 
+For a full fresh-start reset, use:
+
+```bash
+npm run reset:all
+```
+
+This clears Google Sheets logs when enabled, resets local `trades.csv`, `order-events.csv`, `stats.csv`, and `bot-state.json`, and preserves `bot.config.json`, `.env`, and Google Sheets setup/dashboard tabs. Stop the bot before running it.
+
 Google Sheets failures are logged as errors, but they do not stop trade management. If local CSV logging is enabled, it continues separately.
 
 ## Config Separation
