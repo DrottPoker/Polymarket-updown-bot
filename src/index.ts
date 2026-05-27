@@ -267,7 +267,12 @@ function formatLivePrice(price: number | undefined): string {
 }
 
 function liveOrderEntryDetail(order: LiveOrder): string {
-  const mode = order.postOnly === true ? "post-only maker entry" : "limit entry";
+  let mode = "limit entry";
+  if (order.postOnly === true) {
+    mode = "post-only maker entry";
+  } else if (order.requestedPrice !== undefined && Math.abs(order.requestedPrice - order.price) > 1e-9) {
+    mode = "taker fallback entry";
+  }
   const selected = formatLivePrice(order.price);
   if (order.requestedPrice !== undefined && Math.abs(order.requestedPrice - order.price) > 1e-9) {
     return `${mode}; selected ${selected} from requested ${formatLivePrice(

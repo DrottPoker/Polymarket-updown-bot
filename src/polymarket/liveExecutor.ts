@@ -18,6 +18,7 @@ type OrderDetails = Pick<OpenOrder, "status" | "associate_trades">;
 
 type LiveFillDetails = {
   filledSize: number;
+  fillCostUsd: number;
   feeUsd: number;
 };
 
@@ -27,6 +28,7 @@ type LiveEntrySelection = {
   requestedPrice: number;
   price: number;
   size: number;
+  postOnly: boolean;
   bestAskAtPost?: number;
 };
 
@@ -142,6 +144,24 @@ function tradeFilledSizeForOrder(order: LiveOrder, trade: Trade): number {
   return (trade.maker_orders ?? [])
     .filter((makerOrder) => makerOrder.order_id === order.orderId)
     .reduce((filledSize, makerOrder) => filledSize + parsePositiveNumber(makerOrder.matched_amount), 0);
+}
+
+function tradeFillCostForOrder(order: LiveOrder, trade: Trade): number {
+  if (!tradeCanCountAsFill(trade)) {
+    return 0;
+  }
+
+  if (trade.taker_order_id === order.orderId) {
+    return parsePositiveNumber(trade.size) * parsePositiveNumber(trade.price);
+  }
+
+  return (trade.maker_orders ?? [])
+    .filter((makerOrder) => makerOrder.order_id === order.orderId)
+    .reduce(
+      (fillCost, makerOrder) =>
+        fillCost + parsePositiveNumber(makerOrder.matched_amount) * parsePositiveNumber(makerOrder.price),
+      0
+    );
 }
 
 function calculateFillFeeUsd(fillSize: number, price: number, feeDetails: FeeDetails | null, role: FillRole): number {
@@ -301,7 +321,7 @@ export class PolymarketLiveExecutor {
       tickSize,
       minOrderSize: book.min_order_size,
       negRisk: book.neg_risk,
-      postOnly: this.config.livePostOnlyEntryEnabled,
+      postOnly: entrySelection.postOnly,
       requestedPrice: entrySelection.requestedPrice,
       bestAskAtPost: entrySelection.bestAskAtPost,
       status: "DRY_RUN",
@@ -314,7 +334,7 @@ export class PolymarketLiveExecutor {
           side: Side.BUY,
           size: entrySelection.size,
           orderType: OrderType.GTC,
-          postOnly: this.config.livePostOnlyEntryEnabled,
+          postOnly: entrySelection.postOnly,
           options: {
             tickSize,
             negRisk: book.neg_risk,
@@ -358,7 +378,7 @@ export class PolymarketLiveExecutor {
         negRisk: book.neg_risk,
       },
       OrderType.GTC,
-      this.config.livePostOnlyEntryEnabled
+      entrySelection.postOnly
     );
     const orderId = getOrderId(response);
     if (!orderId) {
@@ -379,7 +399,7 @@ export class PolymarketLiveExecutor {
       tickSize,
       minOrderSize: book.min_order_size,
       negRisk: book.neg_risk,
-      postOnly: this.config.livePostOnlyEntryEnabled,
+      postOnly: entrySelection.postOnly,
       requestedPrice: entrySelection.requestedPrice,
       bestAskAtPost: entrySelection.bestAskAtPost,
       orderId,
@@ -433,7 +453,7 @@ export class PolymarketLiveExecutor {
   }
 
   async refreshFillStatus(order: LiveOrder): Promise<LiveOrder> {
-    if ((order.filled && order.feeUsd !== undefined) || !order.orderId) {
+    if ((order.filled && order.feeUsd !== undefined && order.averageFillPrice !== undefined) || !order.orderId) {
       return order;
     }
 
@@ -441,10 +461,12 @@ export class PolymarketLiveExecutor {
       const fillDetails = await this.getFillDetails(order);
       const filledSize = fillDetails.filledSize;
       const normalizedFilledSize = normalizeFilledSize(order, filledSize, this.config.liveFullFillToleranceShares);
+      const averageFillPrice = filledSize > 0 ? fillDetails.fillCostUsd / filledSize : undefined;
       return {
         ...order,
         filled: isFullyFilled(order, filledSize, this.config.liveFullFillToleranceShares),
         filledSize: normalizedFilledSize,
+        averageFillPrice,
         feeUsd: fillDetails.feeUsd,
         fillStatus: "known",
         fillError: undefined,
@@ -467,12 +489,18 @@ export class PolymarketLiveExecutor {
         requestedPrice,
         price: requestedPrice,
         size: trade.shares,
+        postOnly: false,
         bestAskAtPost: bestAskPrice(book),
       };
     }
 
     const bestAskAtPost = bestAskPrice(book);
-    const minPrice = roundUpToTick(this.config.minPostOnlyEntryCents / 100, tickSize);
+    const configuredMinPrice = roundUpToTick(this.config.minPostOnlyEntryCents / 100, tickSize);
+    const fallbackMinPrice = roundUpToTick(
+      requestedPrice - Number(tickSize) * this.config.maxPostOnlyEntryFallbackTicks,
+      tickSize
+    );
+    const minPrice = Math.max(configuredMinPrice, fallbackMinPrice, Number(tickSize));
     let candidatePrice = roundDownToTick(requestedPrice, tickSize);
 
     while (candidatePrice + 1e-12 >= minPrice) {
@@ -481,11 +509,22 @@ export class PolymarketLiveExecutor {
           requestedPrice,
           price: candidatePrice,
           size: liveSizeForStake(trade.stakeUsd, candidatePrice),
+          postOnly: true,
           bestAskAtPost,
         };
       }
 
       candidatePrice = decrementByTick(candidatePrice, tickSize);
+    }
+
+    if (this.config.livePostOnlyFallbackTakerEnabled) {
+      return {
+        requestedPrice,
+        price: minPrice,
+        size: liveSizeForStake(trade.stakeUsd, minPrice),
+        postOnly: false,
+        bestAskAtPost,
+      };
     }
 
     const bestAskLabel = bestAskAtPost === undefined ? "none" : formatCents(bestAskAtPost);
@@ -562,6 +601,7 @@ export class PolymarketLiveExecutor {
     if (!order.orderId) {
       return {
         filledSize: 0,
+        fillCostUsd: 0,
         feeUsd: 0,
       };
     }
@@ -592,10 +632,12 @@ export class PolymarketLiveExecutor {
     return Array.from(tradesById.values()).reduce<LiveFillDetails>(
       (details, trade) => ({
         filledSize: details.filledSize + tradeFilledSizeForOrder(order, trade),
+        fillCostUsd: details.fillCostUsd + tradeFillCostForOrder(order, trade),
         feeUsd: details.feeUsd + tradeFeeForOrder(order, trade, feeDetails),
       }),
       {
         filledSize: 0,
+        fillCostUsd: 0,
         feeUsd: 0,
       }
     );

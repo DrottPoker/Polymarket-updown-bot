@@ -223,7 +223,7 @@ Live dry-run and live mode both use:
 
 Real live mode additionally uses:
 
-- `@polymarket/clob-client-v2` to submit a GTC post-only limit BUY. It starts at `entryCents` and, when that BUY would be marketable against the current best ask, steps down by the market tick until it finds a non-marketable maker price or reaches `minPostOnlyEntryCents`.
+- `@polymarket/clob-client-v2` to submit a GTC post-only limit BUY. It starts at `entryCents` and, when that BUY would be marketable against the current best ask, steps down by the market tick until it finds a non-marketable maker price. The fallback is capped by both `minPostOnlyEntryCents` and `maxPostOnlyEntryFallbackTicks`.
 - Automatic cancel at `candleOpenTime + tradeWindowSeconds`.
 - Fill checking through authenticated CLOB order and trade data before any due cancel is sent.
 - Full-fill confirmation based on successful CLOB trade records for the specific order id. The initial post response status is not enough to count a live trade as filled.
@@ -231,7 +231,7 @@ Real live mode additionally uses:
 - A zero-fill canceled order updates strategy state hypothetically but does not create a trade row.
 - A partially filled canceled order logs the filled portion as a realized trade and still updates strategy state using the signal result.
 
-With `livePostOnlyEntryEnabled=true`, the bot keeps the configured dollar stake and recalculates shares from the selected live price. For example, if the signal asks for 50c but 50c is marketable, the bot tries 49c, then 48c, and so on. If no non-marketable price exists at or above `minPostOnlyEntryCents`, the order is not placed and the signal does not update live retry state.
+With `livePostOnlyEntryEnabled=true`, the bot keeps the configured dollar stake and recalculates shares from the selected live price. For example, if the signal asks for 50c but 50c is marketable, the default settings try 49c, then 48c. If 48c is also marketable and `livePostOnlyFallbackTakerEnabled=true`, the bot posts a non-post-only limit BUY at 48c. If taker fallback is disabled, the signal is skipped for live trading.
 
 To dry-run against Polymarket without placing orders, use `npm run dry-run`. For manual config, set this in `bot.config.json`:
 
@@ -260,7 +260,9 @@ Then set live guards and risk limits in `bot.config.json`:
   "maxLiveTradeWindowSeconds": 60,
   "liveFullFillToleranceShares": 0.01,
   "livePostOnlyEntryEnabled": true,
-  "minPostOnlyEntryCents": 1
+  "livePostOnlyFallbackTakerEnabled": true,
+  "minPostOnlyEntryCents": 48,
+  "maxPostOnlyEntryFallbackTicks": 2
 }
 ```
 

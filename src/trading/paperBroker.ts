@@ -56,10 +56,21 @@ function resizeTradeToShares(trade: PaperTrade, shares: number, entryDecimal: nu
   };
 }
 
+function liveFillEntryDecimal(trade: PaperTrade, liveOrder: LiveOrder): number {
+  if (liveOrder.averageFillPrice && liveOrder.averageFillPrice > 0) {
+    return liveOrder.averageFillPrice;
+  }
+
+  if (liveOrder.price > 0) {
+    return liveOrder.price;
+  }
+
+  return trade.entryCents / 100;
+}
+
 export function resizeTradeToLiveFill(trade: PaperTrade, liveOrder: LiveOrder): PaperTrade {
   const filledShares = Math.min(Math.max(liveOrder.filledSize ?? 0, 0), liveOrder.size);
-  const entryDecimal = liveOrder.price > 0 ? liveOrder.price : trade.entryCents / 100;
-  return resizeTradeToShares(trade, filledShares, entryDecimal, liveOrder.feeUsd);
+  return resizeTradeToShares(trade, filledShares, liveFillEntryDecimal(trade, liveOrder), liveOrder.feeUsd);
 }
 
 export function resizeTradeToUnfilledLiveRemainder(trade: PaperTrade, liveOrder: LiveOrder): PaperTrade {

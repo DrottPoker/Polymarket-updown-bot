@@ -407,6 +407,8 @@ export function logStartup(config: AppConfig): void {
     console.log(`live post-only entry: ${config.livePostOnlyEntryEnabled}`);
     if (config.livePostOnlyEntryEnabled) {
       console.log(`min post-only entry: ${config.minPostOnlyEntryCents}c`);
+      console.log(`max post-only fallback: ${config.maxPostOnlyEntryFallbackTicks} ticks`);
+      console.log(`post-only fallback taker: ${config.livePostOnlyFallbackTakerEnabled}`);
     }
   }
   console.log(`poll: ${config.pollMs}ms`);
@@ -545,6 +547,9 @@ export function logLiveFill(order: LiveOrder): void {
   console.log(`price: ${order.price.toFixed(4)}`);
   console.log(`size: ${order.size.toFixed(4)}`);
   console.log(`filled size: ${(order.filledSize ?? order.size).toFixed(4)}`);
+  if (order.averageFillPrice !== undefined) {
+    console.log(`average fill price: ${order.averageFillPrice.toFixed(4)}`);
+  }
 }
 
 export function logSkip(message: string): void {

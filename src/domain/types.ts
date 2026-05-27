@@ -96,6 +96,7 @@ export type LiveOrder = {
   response: unknown;
   filled: boolean;
   filledSize?: number;
+  averageFillPrice?: number;
   feeUsd?: number;
   fillStatus: LiveFillStatus;
   fillError?: string;

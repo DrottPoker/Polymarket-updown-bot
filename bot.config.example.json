@@ -50,5 +50,7 @@
   "maxLiveTradeWindowSeconds": 300,
   "liveFullFillToleranceShares": 0.01,
   "livePostOnlyEntryEnabled": true,
-  "minPostOnlyEntryCents": 1
+  "livePostOnlyFallbackTakerEnabled": true,
+  "minPostOnlyEntryCents": 48,
+  "maxPostOnlyEntryFallbackTicks": 2
 }

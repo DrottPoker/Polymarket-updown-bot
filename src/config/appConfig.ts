@@ -39,7 +39,9 @@ type BotConfigFile = Partial<{
   maxLiveTradeWindowSeconds: number;
   liveFullFillToleranceShares: number;
   livePostOnlyEntryEnabled: boolean;
+  livePostOnlyFallbackTakerEnabled: boolean;
   minPostOnlyEntryCents: number;
+  maxPostOnlyEntryFallbackTicks: number;
   earlyEntryEnabled: boolean;
   earlyEntryPrimarySecondsBeforeClose: number;
   earlyEntryPrimaryMinMovePct: number;
@@ -102,7 +104,9 @@ export type AppConfig = {
   maxLiveTradeWindowSeconds: number;
   liveFullFillToleranceShares: number;
   livePostOnlyEntryEnabled: boolean;
+  livePostOnlyFallbackTakerEnabled: boolean;
   minPostOnlyEntryCents: number;
+  maxPostOnlyEntryFallbackTicks: number;
   earlyEntryEnabled: boolean;
   earlyEntryPrimarySecondsBeforeClose: number;
   earlyEntryPrimaryMinMovePct: number;
@@ -273,7 +277,9 @@ export function loadConfig(): AppConfig {
     maxLiveTradeWindowSeconds: readNumber(configFile, "maxLiveTradeWindowSeconds", 60),
     liveFullFillToleranceShares: readNumber(configFile, "liveFullFillToleranceShares", 0.01),
     livePostOnlyEntryEnabled: readBoolean(configFile, "livePostOnlyEntryEnabled", true),
-    minPostOnlyEntryCents: readNumber(configFile, "minPostOnlyEntryCents", 1),
+    livePostOnlyFallbackTakerEnabled: readBoolean(configFile, "livePostOnlyFallbackTakerEnabled", true),
+    minPostOnlyEntryCents: readNumber(configFile, "minPostOnlyEntryCents", 48),
+    maxPostOnlyEntryFallbackTicks: readNumber(configFile, "maxPostOnlyEntryFallbackTicks", 2),
     earlyEntryEnabled: readBoolean(configFile, "earlyEntryEnabled", false),
     earlyEntryPrimarySecondsBeforeClose: readNumber(configFile, "earlyEntryPrimarySecondsBeforeClose", 15),
     earlyEntryPrimaryMinMovePct: readNumber(configFile, "earlyEntryPrimaryMinMovePct", 0.05),
@@ -379,6 +385,14 @@ function validateConfig(config: AppConfig): void {
     throw new Error(
       `minPostOnlyEntryCents (${config.minPostOnlyEntryCents}) must not exceed entryCents (${config.entryCents})`
     );
+  }
+
+  if (
+    !Number.isInteger(config.maxPostOnlyEntryFallbackTicks) ||
+    config.maxPostOnlyEntryFallbackTicks < 0 ||
+    config.maxPostOnlyEntryFallbackTicks > 50
+  ) {
+    throw new Error("maxPostOnlyEntryFallbackTicks must be an integer between 0 and 50");
   }
 
   if (config.earlyEntryPrimarySecondsBeforeClose <= 0) {

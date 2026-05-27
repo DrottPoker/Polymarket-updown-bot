@@ -240,7 +240,7 @@ It then reads Gamma metadata and resolves the correct `Up` or `Down` token id.
 
 ## Limit Order Placement
 
-Live mode posts GTC limit BUY orders. With `livePostOnlyEntryEnabled=true`, those orders are post-only maker orders. The bot starts at `entryCents`; if that BUY would cross the current best ask, it steps down by the market tick until the price is no longer marketable or `minPostOnlyEntryCents` is reached.
+Live mode posts GTC limit BUY orders. With `livePostOnlyEntryEnabled=true`, those orders are post-only maker orders. The bot starts at `entryCents`; if that BUY would cross the current best ask, it steps down by the market tick until the price is no longer marketable. The fallback is capped by both `minPostOnlyEntryCents` and `maxPostOnlyEntryFallbackTicks`.
 
 Before posting, the bot checks:
 
@@ -257,7 +257,7 @@ The bot keeps the configured dollar stake and calculates live shares from the se
 stakeUsd / selectedLivePrice
 ```
 
-If no non-marketable post-only price exists at or above `minPostOnlyEntryCents`, no order is placed and the signal does not update live retry state.
+If no non-marketable post-only price exists within the capped fallback range and `livePostOnlyFallbackTakerEnabled=true`, the bot posts a non-post-only limit BUY at the fallback floor price. If taker fallback is disabled, no order is placed and the signal does not update live retry state.
 
 ## Order Cancel And Fill Tracking
 
@@ -272,6 +272,8 @@ The bot keeps polling while the order is pending.
 If the order fills, the resolved trade is logged after candle close.
 
 Before a due cancel is sent, the bot checks authenticated CLOB trade records for successful matched size on the specific order id. If the order is already fully filled, it logs `[LIVE_FILL]` and does not send the cancel. Tiny CLOB dust differences are treated as full fills using `liveFullFillToleranceShares`.
+
+Resolved live trades use the CLOB average fill price when authenticated trade records provide it. This keeps taker fallback fills from being settled at the limit price when they receive price improvement.
 
 If the order does not fully fill, the order is canceled when due. A non-zero partial fill outside the tolerance is logged proportionally. A zero-fill order updates strategy state hypothetically after candle close, but no real trade row is written.
 
@@ -288,7 +290,9 @@ Configured with:
   "maxLiveTradeWindowSeconds": 300,
   "liveFullFillToleranceShares": 0.01,
   "livePostOnlyEntryEnabled": true,
-  "minPostOnlyEntryCents": 1
+  "livePostOnlyFallbackTakerEnabled": true,
+  "minPostOnlyEntryCents": 48,
+  "maxPostOnlyEntryFallbackTicks": 2
 }
 ```
 

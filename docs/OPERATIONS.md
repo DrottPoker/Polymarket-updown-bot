@@ -80,11 +80,13 @@ nano .env
   "maxTradesPerDay": 20,
   "liveFullFillToleranceShares": 0.01,
   "livePostOnlyEntryEnabled": true,
-  "minPostOnlyEntryCents": 1
+  "livePostOnlyFallbackTakerEnabled": true,
+  "minPostOnlyEntryCents": 48,
+  "maxPostOnlyEntryFallbackTicks": 2
 }
 ```
 
-When `livePostOnlyEntryEnabled=true`, live entries are maker-first. The bot starts at `entryCents`, steps down by the market tick when that BUY would be marketable against the current best ask, and posts the first non-marketable post-only order it finds. The live order keeps the configured dollar stake by recalculating shares from the selected price. If no non-marketable price exists at or above `minPostOnlyEntryCents`, the signal is skipped for live trading.
+When `livePostOnlyEntryEnabled=true`, live entries are maker-first. The bot starts at `entryCents`, steps down by the market tick when that BUY would be marketable against the current best ask, and posts the first non-marketable post-only order it finds within the capped fallback range. The live order keeps the configured dollar stake by recalculating shares from the selected price. If the fallback floor is still marketable and `livePostOnlyFallbackTakerEnabled=true`, the bot posts a non-post-only limit BUY at that floor price. If taker fallback is disabled, the signal is skipped for live trading.
 
 Recommended:
 
@@ -419,7 +421,7 @@ These files can be opened in Excel or imported into Google Sheets.
 - Do not run `npm run live` while PM2 is also running the bot.
 - Use a separate wallet with limited funds.
 - Keep `maxDailyLossUsd`, `maxTradesPerDay`, and `maxStakeUsd` conservative.
-- Keep `minPostOnlyEntryCents` realistic. A very low value can create passive orders far below the signal price.
+- Keep `minPostOnlyEntryCents` and `maxPostOnlyEntryFallbackTicks` realistic. A wide fallback can create passive orders far below the signal price.
 - Check `pm2 logs polymarket-bot` after every deploy or config change.
 - Keep Polymarket's own auto-redeem wins enabled in the UI.
 - Do not run live trading from a blocked region.
