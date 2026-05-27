@@ -53,14 +53,15 @@ function buildClearTargets(config: ReturnType<typeof loadConfig>): ClearTarget[]
   ];
 }
 
-function buildPreservedSheetNames(clearTargets: ClearTarget[]): string[] {
+function buildPreservedSheetNames(clearTargets: ClearTarget[], config: ReturnType<typeof loadConfig>): string[] {
   const targetNames = new Set(clearTargets.map((target) => target.sheetName));
-  return preservedSheetNames.filter((sheetName) => !targetNames.has(sheetName));
+  const preservedNames = [...preservedSheetNames, config.googleSheetsCandlesSheetName];
+  return Array.from(new Set(preservedNames)).filter((sheetName) => !targetNames.has(sheetName));
 }
 
 function printClearPlan(config: ReturnType<typeof loadConfig>): void {
   const clearTargets = buildClearTargets(config);
-  const preservedNames = buildPreservedSheetNames(clearTargets);
+  const preservedNames = buildPreservedSheetNames(clearTargets, config);
 
   console.log("Clear targets:");
   for (const target of clearTargets) {
@@ -87,6 +88,7 @@ function printHelp(): void {
   console.log("  - Clears the configured Google Sheets Order Events tab back to the current header row.");
   console.log("  - Rebuilds the configured Google Sheets Stats tab from the now-empty Trades tab.");
   console.log("  - Preserves Setup, Dashboard, Advanced Stats, and Analysis Data when those tabs exist.");
+  console.log("  - Preserves the Candles tab used for future backtesting data.");
   console.log("  - Keeps Setup inputs such as starting balance and expected winrate unchanged.");
   console.log("  - Does not delete the spreadsheet itself.");
   console.log("  - Does not edit local trades.csv or stats.csv files.");

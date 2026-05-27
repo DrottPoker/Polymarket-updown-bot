@@ -380,6 +380,7 @@ Configured with:
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
   "googleSheetsOrderEventsSheetName": "Order Events",
+  "googleSheetsCandlesSheetName": "Candles",
   "googleSheetsRequestTimeoutMs": 10000
 }
 ```
@@ -393,7 +394,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-The bot creates the configured `Trades`, `Stats`, and `Order Events` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from realized rows already present in that same Google Sheets `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`.
+The bot creates the configured `Trades`, `Stats`, `Order Events`, and `Candles` tabs if they do not exist. It appends resolved trades to the trades tab and refreshes the stats tab from realized rows already present in that same Google Sheets `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`.
 
 The `Order Events` tab records live execution events that are not trades:
 
@@ -403,6 +404,8 @@ The `Order Events` tab records live execution events that are not trades:
 - `ORDER_NOT_FILLED`: an order reached candle close without being fully filled. If `filled_size` is greater than zero, the filled portion is still logged proportionally in `Trades`. These rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known, so missed fills can be analyzed separately from realized trades. For partial fills, `missed_pnl` is sized only to the unfilled remainder.
 
 Live CLOB taker fees are deducted from realized `pnl` and written to the trailing `fee_usd` column in `Trades`. Maker fills currently log zero fee unless Polymarket reports a fee-enabled maker structure for the market.
+
+The `Candles` tab records closed Polymarket ETH candles by open time. Rows include open time, close time, millisecond timestamps, asset, interval, market slug, source, open, high, low, close, color, result, official flag, and update time. Provisional rows are updated when official candle data arrives, so backtests can use one row per candle.
 
 `live_status` is the initial status returned by Polymarket when the order was posted. `live` means the order was accepted and open at first. `matched` means the post response matched against liquidity immediately. `partial` means the order did not fully fill before cancel, but a non-zero filled portion was logged proportionally as a realized trade. Realized performance should use `live_filled`, not `live_status`.
 
@@ -428,7 +431,7 @@ Run this to show the built-in guide without clearing anything:
 npm run sheets:clear:help
 ```
 
-The clear script only affects the configured raw Google Sheets tabs: `Trades` back to A:W headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. It does not reset `Setup` inputs and does not modify local CSV files.
+The clear script only affects the configured raw Google Sheets tabs: `Trades` back to A:W headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, `Analysis Data`, and `Candles` when those tabs exist. It does not reset `Setup` inputs and does not modify local CSV files.
 
 For a full fresh-start reset, use:
 
@@ -436,7 +439,7 @@ For a full fresh-start reset, use:
 npm run reset:all
 ```
 
-This clears Google Sheets logs when enabled, resets local `trades.csv`, `order-events.csv`, `stats.csv`, and `bot-state.json`, and preserves `bot.config.json`, `.env`, and Google Sheets setup/dashboard tabs. Stop the bot before running it.
+This clears Google Sheets trade and order logs when enabled, resets local `trades.csv`, `order-events.csv`, `stats.csv`, and `bot-state.json`, and preserves `bot.config.json`, `.env`, Google Sheets setup/dashboard tabs, and the `Candles` backtesting tab. Stop the bot before running it.
 
 Google Sheets failures are logged as errors, but they do not stop trade management. If local CSV logging is enabled, it continues separately.
 

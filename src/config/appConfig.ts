@@ -57,6 +57,7 @@ type BotConfigFile = Partial<{
   googleSheetsTradesSheetName: string;
   googleSheetsStatsSheetName: string;
   googleSheetsOrderEventsSheetName: string;
+  googleSheetsCandlesSheetName: string;
   googleSheetsRequestTimeoutMs: number;
 }>;
 
@@ -122,6 +123,7 @@ export type AppConfig = {
   googleSheetsTradesSheetName: string;
   googleSheetsStatsSheetName: string;
   googleSheetsOrderEventsSheetName: string;
+  googleSheetsCandlesSheetName: string;
   googleSheetsRequestTimeoutMs: number;
   googleServiceAccountEmail: string;
   googlePrivateKey: string;
@@ -295,6 +297,7 @@ export function loadConfig(): AppConfig {
     googleSheetsTradesSheetName: readString(configFile, "googleSheetsTradesSheetName", "Trades"),
     googleSheetsStatsSheetName: readString(configFile, "googleSheetsStatsSheetName", "Stats"),
     googleSheetsOrderEventsSheetName: readString(configFile, "googleSheetsOrderEventsSheetName", "Order Events"),
+    googleSheetsCandlesSheetName: readString(configFile, "googleSheetsCandlesSheetName", "Candles"),
     googleSheetsRequestTimeoutMs: readNumber(configFile, "googleSheetsRequestTimeoutMs", 10_000),
     googleServiceAccountEmail: readSecretString("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
     googlePrivateKey: readGooglePrivateKey(),
@@ -495,13 +498,20 @@ function validateGoogleSheetsConfig(config: AppConfig): void {
     throw new Error("googleSheetsOrderEventsSheetName must not be empty");
   }
 
+  if (!config.googleSheetsCandlesSheetName) {
+    throw new Error("googleSheetsCandlesSheetName must not be empty");
+  }
+
   const sheetNames = [
     config.googleSheetsTradesSheetName,
     config.googleSheetsStatsSheetName,
     config.googleSheetsOrderEventsSheetName,
+    config.googleSheetsCandlesSheetName,
   ];
   if (new Set(sheetNames).size !== sheetNames.length) {
-    throw new Error("googleSheetsTradesSheetName, googleSheetsStatsSheetName, and googleSheetsOrderEventsSheetName must be different");
+    throw new Error(
+      "googleSheetsTradesSheetName, googleSheetsStatsSheetName, googleSheetsOrderEventsSheetName, and googleSheetsCandlesSheetName must be different"
+    );
   }
 
   if (!config.googleServiceAccountEmail.includes("@")) {

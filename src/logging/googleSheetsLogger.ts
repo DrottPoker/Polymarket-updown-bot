@@ -1,10 +1,12 @@
 import { createSign } from "node:crypto";
 import { AppConfig } from "../config/appConfig";
-import { LiveOrder, OrderEvent, ResolvedPaperTrade } from "../domain/types";
+import { Candle, LiveOrder, OrderEvent, ResolvedPaperTrade } from "../domain/types";
 import {
+  buildCandleLogRow,
   buildOrderEventRow,
   buildStatsCsvValuesFromRows,
   buildTradeResultRow,
+  candleLogColumns,
   CsvRow,
   orderEventCsvColumns,
   statsCsvColumns,
@@ -36,6 +38,11 @@ type SpreadsheetMetadataResponse = {
 
 type ValueRangeResponse = {
   values?: Array<Array<string | number | boolean>>;
+};
+
+type BatchValueUpdate = {
+  range: string;
+  values: SheetValue[][];
 };
 
 const sheetsScope = "https://www.googleapis.com/auth/spreadsheets";
@@ -76,6 +83,8 @@ const numericColumns = new Set([
   "stake_usd",
   "shares",
   "open",
+  "high",
+  "low",
   "close",
   "pnl",
   "live_price",
@@ -84,8 +93,10 @@ const numericColumns = new Set([
   "filled_size",
   "missed_pnl",
   "missed_close",
+  "open_time_ms",
+  "close_time_ms",
 ]);
-const booleanColumns = new Set(["live_filled", "canceled"]);
+const booleanColumns = new Set(["live_filled", "canceled", "is_official"]);
 
 function parseSheetValue(column: string, value: string): SheetValue {
   const trimmed = value.trim();
@@ -257,6 +268,57 @@ export class GoogleSheetsLogger {
     );
   }
 
+  async readTradeRows(): Promise<CsvRow[]> {
+    return this.readTradeRowsFromSheet();
+  }
+
+  async upsertCandles(candles: Candle[]): Promise<void> {
+    const candlesByOpenTime = new Map<number, Candle>();
+    for (const candle of candles) {
+      candlesByOpenTime.set(candle.openTime, candle);
+    }
+
+    const uniqueCandles = Array.from(candlesByOpenTime.values()).sort((a, b) => a.openTime - b.openTime);
+    if (uniqueCandles.length === 0) {
+      return;
+    }
+
+    await this.ensureSheets();
+    const existingRows = await this.readCandleRowsFromSheet();
+    const rowNumberByOpenTime = new Map<number, number>();
+    existingRows.forEach((row, index) => {
+      const openTime = Number(row.open_time_ms || Date.parse(row.open_time));
+      if (Number.isFinite(openTime) && openTime > 0) {
+        rowNumberByOpenTime.set(openTime, index + 2);
+      }
+    });
+
+    const updatedAt = Date.now();
+    const updates: BatchValueUpdate[] = [];
+    const appends: SheetValue[][] = [];
+    for (const candle of uniqueCandles) {
+      const values = normalizeValues([buildCandleLogRow(this.config, candle, updatedAt)])[0];
+      const rowNumber = rowNumberByOpenTime.get(candle.openTime);
+      if (rowNumber) {
+        updates.push({
+          range: sheetRange(
+            this.config.googleSheetsCandlesSheetName,
+            `A${rowNumber}:${columnName(candleLogColumns.length)}${rowNumber}`
+          ),
+          values: [values],
+        });
+        continue;
+      }
+
+      appends.push(values);
+    }
+
+    await this.batchUpdateValues(updates);
+    if (appends.length > 0) {
+      await this.appendValues(this.config.googleSheetsCandlesSheetName, candleLogColumns.length, appends);
+    }
+  }
+
   async reconcileLocalCsvLogs(
     tradeRows: CsvRow[],
     orderEventRows: CsvRow[],
@@ -305,9 +367,11 @@ export class GoogleSheetsLogger {
     await this.ensureSheetExists(this.config.googleSheetsTradesSheetName, titles);
     await this.ensureSheetExists(this.config.googleSheetsStatsSheetName, titles);
     await this.ensureSheetExists(this.config.googleSheetsOrderEventsSheetName, titles);
+    await this.ensureSheetExists(this.config.googleSheetsCandlesSheetName, titles);
     await this.ensureHeader(this.config.googleSheetsTradesSheetName, tradeCsvColumns);
     await this.ensureHeader(this.config.googleSheetsStatsSheetName, statsCsvColumns);
     await this.ensureHeader(this.config.googleSheetsOrderEventsSheetName, orderEventCsvColumns);
+    await this.ensureHeader(this.config.googleSheetsCandlesSheetName, candleLogColumns);
   }
 
   private async ensureSheetExists(sheetName: string, titles: Set<string>): Promise<void> {
@@ -358,6 +422,10 @@ export class GoogleSheetsLogger {
     return this.readRowsFromSheet(this.config.googleSheetsOrderEventsSheetName, orderEventCsvColumns.length);
   }
 
+  private async readCandleRowsFromSheet(): Promise<CsvRow[]> {
+    return this.readRowsFromSheet(this.config.googleSheetsCandlesSheetName, candleLogColumns.length);
+  }
+
   private async readRowsFromSheet(sheetName: string, columnCount: number): Promise<CsvRow[]> {
     const range = sheetRange(sheetName, `A:${columnName(columnCount)}`);
     const response = await this.requestJson<ValueRangeResponse>(
@@ -393,6 +461,17 @@ export class GoogleSheetsLogger {
     const fullRange = sheetRange(sheetName, range);
     await this.requestJson("PUT", `/values/${encodeURIComponent(fullRange)}?valueInputOption=RAW`, {
       values,
+    });
+  }
+
+  private async batchUpdateValues(updates: BatchValueUpdate[]): Promise<void> {
+    if (updates.length === 0) {
+      return;
+    }
+
+    await this.requestJson("POST", "/values:batchUpdate", {
+      valueInputOption: "RAW",
+      data: updates,
     });
   }
 

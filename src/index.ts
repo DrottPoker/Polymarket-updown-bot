@@ -434,6 +434,7 @@ function processOfficialClosedCandleCorrections(closedCandles: Candle[]): void {
     rememberProcessedClosedCandle(candle);
     rebuildStrategyFromProcessedHistory();
     logCandleCorrection(previous, candle);
+    syncGoogleSheetsCandles([candle]);
   }
 }
 
@@ -538,6 +539,7 @@ function warmUpStrategy(closedCandles: Candle[]): void {
     rememberProcessedClosedCandle(candle);
     historicalWarmupOpenTimes.add(candle.openTime);
   }
+  syncGoogleSheetsCandles(closedCandles);
   lastProcessedClosedCandleOpenTime = closedCandles[closedCandles.length - 1]?.openTime ?? 0;
   initialized = true;
   logWarmup(closedCandles.length);
@@ -802,6 +804,23 @@ function syncGoogleSheetsTrade(trade: ResolvedPaperTrade, liveOrder?: LiveOrder 
   });
 }
 
+function syncGoogleSheetsCandles(candles: Candle[]): void {
+  const logger = googleSheetsLogger;
+  if (!logger || candles.length === 0) {
+    return;
+  }
+
+  queueGoogleSheetsTask(async () => {
+    try {
+      await logger.upsertCandles(candles);
+    } catch (error) {
+      logError(error);
+      await sleep(1_000);
+      await logger.upsertCandles(candles);
+    }
+  });
+}
+
 function initializeLocalCsvLogs(): void {
   if (!config.localCsvLoggingEnabled) {
     return;
@@ -955,6 +974,7 @@ function finishProcessedClosedCandle(candle: Candle): void {
   const targetOpenTime = candle.closeTime + 1;
   logStartupSkippedCandleClosed(candle);
   rememberProcessedClosedCandle(candle);
+  syncGoogleSheetsCandles([candle]);
   logCandleDecision(candle, strategy.getRecentTrendColors(5), strategy.getSignalForNextCandle(), targetOpenTime);
   lastDecisionLogTargetOpenTime = targetOpenTime;
   lastProcessedClosedCandleOpenTime = candle.openTime;

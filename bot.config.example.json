@@ -31,6 +31,7 @@
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
   "googleSheetsOrderEventsSheetName": "Order Events",
+  "googleSheetsCandlesSheetName": "Candles",
   "googleSheetsRequestTimeoutMs": 10000,
   "executionMode": "paper",
   "liveTradingEnabled": false,

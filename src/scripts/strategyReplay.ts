@@ -154,6 +154,7 @@ const defaultConfig: AppConfig = {
   googleSheetsTradesSheetName: "Trades",
   googleSheetsStatsSheetName: "Stats",
   googleSheetsOrderEventsSheetName: "Order Events",
+  googleSheetsCandlesSheetName: "Candles",
   googleSheetsRequestTimeoutMs: 10_000,
   googleServiceAccountEmail: "",
   googlePrivateKey: "",

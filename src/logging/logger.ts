@@ -76,6 +76,26 @@ export const orderEventCsvColumns = [
 ];
 export const orderEventCsvHeader = orderEventCsvColumns.join(",");
 
+export const candleLogColumns = [
+  "open_time",
+  "close_time",
+  "open_time_ms",
+  "close_time_ms",
+  "asset",
+  "interval",
+  "market_slug",
+  "source",
+  "open",
+  "high",
+  "low",
+  "close",
+  "color",
+  "result",
+  "is_official",
+  "updated_at",
+];
+export const candleLogHeader = candleLogColumns.join(",");
+
 export type CsvRow = Record<string, string>;
 
 type StatsBucket = {
@@ -97,6 +117,30 @@ function toIso(ms: number): string {
 function formatMoney(value: number): string {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}$${value.toFixed(2)}`;
+}
+
+function formatPriceNumber(value: number): number {
+  return Number(value.toFixed(8));
+}
+
+function candleResult(candle: Candle): "UP" | "DOWN" | "DOJI" {
+  if (candle.color === "green") {
+    return "UP";
+  }
+
+  if (candle.color === "red") {
+    return "DOWN";
+  }
+
+  return "DOJI";
+}
+
+function candleSource(candle: Candle): string {
+  return candle.settlement ?? "official";
+}
+
+function candleMarketSlug(config: AppConfig, candle: Candle): string {
+  return `${config.polymarketAssetSlug}-updown-${config.polymarketIntervalSlug}-${Math.floor(candle.openTime / 1000)}`;
 }
 
 function formatCandle(candle: Candle): string {
@@ -423,6 +467,7 @@ export function logStartup(config: AppConfig): void {
     console.log(`google trades sheet: ${config.googleSheetsTradesSheetName}`);
     console.log(`google stats sheet: ${config.googleSheetsStatsSheetName}`);
     console.log(`google order events sheet: ${config.googleSheetsOrderEventsSheetName}`);
+    console.log(`google candles sheet: ${config.googleSheetsCandlesSheetName}`);
   }
 }
 
@@ -623,6 +668,31 @@ export function buildOrderEventRow(event: OrderEvent): Array<string | number | b
     event.missedTrade?.result,
     event.missedTrade ? formatCurrencyNumber(event.missedTrade.pnl) : undefined,
     event.missedTrade?.close,
+  ];
+}
+
+export function buildCandleLogRow(
+  config: AppConfig,
+  candle: Candle,
+  updatedAt = Date.now()
+): Array<string | number | boolean> {
+  return [
+    toIso(candle.openTime),
+    toIso(candle.closeTime),
+    candle.openTime,
+    candle.closeTime,
+    config.polymarketAssetSlug.toUpperCase(),
+    config.polymarketIntervalSlug,
+    candleMarketSlug(config, candle),
+    candleSource(candle),
+    formatPriceNumber(candle.open),
+    formatPriceNumber(candle.high),
+    formatPriceNumber(candle.low),
+    formatPriceNumber(candle.close),
+    candle.color,
+    candleResult(candle),
+    candleSource(candle) === "official",
+    toIso(updatedAt),
   ];
 }
 

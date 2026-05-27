@@ -115,6 +115,7 @@ function printHelp(): void {
   console.log("What it preserves:");
   console.log("  - bot.config.json and .env.");
   console.log("  - Google Sheets Setup, Dashboard, Advanced Stats, and Analysis Data tabs when present.");
+  console.log("  - Configured Google Sheets Candles tab when present.");
   console.log("  - Spreadsheet settings such as starting balance and expected winrate.");
   console.log("");
   console.log("Before running on the VPS:");
@@ -133,7 +134,8 @@ function printPlan(config: ReturnType<typeof loadConfig>): void {
   console.log("  - bot.config.json");
   console.log("  - .env");
   if (config.googleSheetsEnabled) {
-    for (const sheetName of preservedSheetNames) {
+    const preservedNames = Array.from(new Set([...preservedSheetNames, config.googleSheetsCandlesSheetName]));
+    for (const sheetName of preservedNames) {
       console.log(`  - ${sheetName}`);
     }
   }

@@ -172,6 +172,7 @@ Enable Google Sheets logging in `bot.config.json`:
   "googleSheetsTradesSheetName": "Trades",
   "googleSheetsStatsSheetName": "Stats",
   "googleSheetsOrderEventsSheetName": "Order Events",
+  "googleSheetsCandlesSheetName": "Candles",
   "googleSheetsRequestTimeoutMs": 10000
 }
 ```
@@ -183,7 +184,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@your-project.iam.gserviceaccou
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Live CLOB taker fees are deducted from `pnl` and written to the trailing `fee_usd` column so balances use net realized PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. `ORDER_NOT_FILLED` rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known. For partial fills, `missed_pnl` is sized only to the unfilled remainder.
+Google Sheets stats are calculated from realized rows in the configured `Trades` tab. Paper rows with no `order_id` are counted. Live rows are counted only when `live_filled` is `TRUE`. Partially filled live orders are logged with `live_status=partial`, `live_filled=TRUE`, and a proportional stake, share size, and PnL. Live CLOB taker fees are deducted from `pnl` and written to the trailing `fee_usd` column so balances use net realized PnL. Order placement, fill, final-check cancel, and unfilled-order events are written to the configured `Order Events` tab so execution quality can be analyzed without counting those rows as filled trades. `ORDER_NOT_FILLED` rows include `missed_result`, `missed_pnl`, and `missed_close` when the candle result is known. For partial fills, `missed_pnl` is sized only to the unfilled remainder. Closed Polymarket ETH candles are upserted into the configured `Candles` tab with open, high, low, close, source, result, and market slug so future backtests can use raw market outcomes.
 
 When `localCsvLoggingEnabled` is `false`, the bot does not create, migrate, append, or refresh local CSV log files. This is allowed for paper mode when Google Sheets is your main trade log. Live mode requires local CSV logging because order events and recovery state need a durable local audit trail.
 
@@ -207,7 +208,7 @@ To show the built-in script guide without clearing anything:
 npm run sheets:clear:help
 ```
 
-This clears only the configured raw log tabs: `Trades` back to A:W headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset. It does not delete or edit local `trades.csv` or `stats.csv`.
+This clears only the configured raw log tabs: `Trades` back to A:W headers, `Order Events` back to A:AA headers, and `Stats` rebuilt from the now-empty `Trades` tab. It preserves `Setup`, `Dashboard`, `Advanced Stats`, `Analysis Data`, and `Candles` when those tabs exist. `Setup` inputs such as starting balance and expected winrate are not reset. It does not delete or edit local `trades.csv` or `stats.csv`.
 
 To reset the bot as if it has not run yet, while keeping config and spreadsheet setup intact:
 
@@ -218,7 +219,23 @@ npm run reset:all
 pm2 start polymarket-bot
 ```
 
-The full reset clears Google Sheets `Trades`, `Order Events`, and `Stats` when Google Sheets is enabled. It also rewrites local `trades.csv` and `order-events.csv` to header-only files, rebuilds `stats.csv` from the empty trade log, and resets `bot-state.json` so pending orders, pending settlements, and runtime risk counters start from zero. It preserves `bot.config.json`, `.env`, and Google Sheets `Setup`, `Dashboard`, `Advanced Stats`, and `Analysis Data` tabs when present.
+The full reset clears Google Sheets `Trades`, `Order Events`, and `Stats` when Google Sheets is enabled. It also rewrites local `trades.csv` and `order-events.csv` to header-only files, rebuilds `stats.csv` from the empty trade log, and resets `bot-state.json` so pending orders, pending settlements, and runtime risk counters start from zero. It preserves `bot.config.json`, `.env`, and Google Sheets `Setup`, `Dashboard`, `Advanced Stats`, `Analysis Data`, and `Candles` tabs when present.
+
+To simulate reversing only realized BASE trades from Google Sheets:
+
+```bash
+npm run simulate:reverse-base
+```
+
+The simulation reads the configured `Trades` tab, excludes all `RETRY` rows, flips each BASE direction, and prints original versus reversed BASE performance. It does not edit Google Sheets, local CSV files, runtime state, or config. Reversed net PnL reuses the logged `fee_usd` as a fee estimate and also prints gross PnL.
+
+To backfill the configured `Candles` tab with the latest fetched closed candles:
+
+```bash
+npm run sheets:candles:sync
+```
+
+The bot does this automatically at startup and as candles close. The manual sync is only for immediate backfill or verification after deploy.
 
 ## Strategy Replay Tests
 

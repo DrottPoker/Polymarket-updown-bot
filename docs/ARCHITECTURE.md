@@ -224,14 +224,15 @@ It handles:
 
 - Service account JWT authentication.
 - Google Sheets API token refresh.
-- Trades and stats tab creation.
+- Trades, order events, stats, and candles tab creation.
 - Header creation.
 - Trade row appends.
 - Stats tab replacement from Google Sheets `Trades` tab data.
+- Closed candle upserts for future backtesting.
 - Google Sheets log clearing for remote restart.
 - Timeout-bound HTTP requests.
 
-Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab. The main loop queues Google Sheets writes outside the live order-management path. When local CSV logging is enabled, startup and failed-write recovery reconcile missing local CSV rows into the configured Google Sheets `Trades` and `Order Events` tabs. Startup reconciliation skips bulk backfill when both raw Google Sheets tabs are empty, so an intentional remote reset stays empty.
+Google Sheets is treated as a separate remote log. Its stats are derived only from rows in the Google Sheets `Trades` tab. The main loop queues Google Sheets writes outside the live order-management path. Closed candles are upserted into the configured `Candles` tab by open time, so provisional rows can be replaced by official rows without duplicates. When local CSV logging is enabled, startup and failed-write recovery reconcile missing local CSV rows into the configured Google Sheets `Trades` and `Order Events` tabs. Startup reconciliation skips bulk backfill when both raw Google Sheets tabs are empty, so an intentional remote reset stays empty.
 
 Live fill accounting keeps Polymarket CLOB fees on the `LiveOrder`. The live executor derives filled size and fee from confirmed CLOB trades and the market fee parameters, then `paperBroker` subtracts that fee from realized live PnL before rows are written to local CSV or Google Sheets.
 
