@@ -186,6 +186,14 @@ To backfill the configured `Candles` tab with the latest fetched closed candles:
 npm run sheets:candles:sync
 ```
 
+To backtest reversed BASE signals directly from the configured `Candles` tab:
+
+```bash
+npm run backtest:reverse-base-candles
+```
+
+Use `npm run backtest:reverse-base-candles:official` to exclude provisional candle rows.
+
 ## Early Entry
 
 When `earlyEntryEnabled=true`, the bot checks the forming candle in three stages before the next contract opens.
@@ -295,6 +303,7 @@ npm run dry-run
 npm run dry-run:once
 npm run live
 npm run sheets:candles:sync
+npm run backtest:reverse-base-candles
 npm run simulate:reverse-base
 npm run test:strategy
 npm run replay:fixture -- fixtures/strategy/base-three-red-up.json

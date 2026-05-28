@@ -237,6 +237,20 @@ npm run sheets:candles:sync
 
 The bot does this automatically at startup and as candles close. The manual sync is only for immediate backfill or verification after deploy.
 
+To backtest reversed BASE signals directly from the configured `Candles` tab:
+
+```bash
+npm run backtest:reverse-base-candles
+```
+
+Use this variant to exclude provisional candle rows:
+
+```bash
+npm run backtest:reverse-base-candles:official
+```
+
+This is a closed-candle BASE-only backtest. It excludes RETRY logic and does not simulate the 15s, 5s, or 1s early-entry timing.
+
 ## Strategy Replay Tests
 
 Run deterministic strategy fixtures before changing signal timing, doji handling, retry logic, early-entry logic, or provisional/official candle handling:

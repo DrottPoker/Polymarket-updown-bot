@@ -272,6 +272,10 @@ export class GoogleSheetsLogger {
     return this.readTradeRowsFromSheet();
   }
 
+  async readCandleRows(): Promise<CsvRow[]> {
+    return this.readCandleRowsFromSheet();
+  }
+
   async upsertCandles(candles: Candle[]): Promise<void> {
     const candlesByOpenTime = new Map<number, Candle>();
     for (const candle of candles) {
